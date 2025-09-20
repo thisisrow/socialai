@@ -26,7 +26,7 @@ export default function Setting() {
             await axios.post(`${API_BASE_URL}/users/connectiondetails`, formData);
       setMessage('Connection details saved successfully!');
     } catch (error: any) {
-      setMessage(error.response?.data?.message || 'An error occurred while saving the details.');
+      setMessage(error.response?.data?.details || error.response?.data?.error || 'An error occurred while saving the details.');
     } finally {
       setLoading(false);
     }

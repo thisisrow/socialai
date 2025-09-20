@@ -241,6 +241,10 @@ exports.updateConnectionDetails = async (req, res) => {
         });
     } catch (error) {
         console.error("Error updating connection details:", error);
-        res.status(500).json({ error: "Error updating connection details" });
+        res.status(500).json({ 
+            success: false,
+            error: "Error updating connection details",
+            details: error.message
+        });
     }
 };
