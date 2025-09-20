@@ -7,7 +7,7 @@ const axios = require('axios');
 const userRoutes = require('./routes/userroutes');
 const connectDB = require('./connection/db');
 
-// ================== CONFIG (TEST ONLY – do NOT commit these) ==================
+// ================== CONFIG (TEST ONLY – do NOT commit these) ================== ACCESS_TOKEN,IG_USER_ID,IG_USERNAME,IG_VERIFY_TOKEN,APP_SECRET
 const PORT = process.env.PORT || 5000;
 const ACCESS_TOKEN = "IGAARyPjOfdWNBZAE1qQVZAzWTk1UWFPUkV4MlVkZAWwzcXduZAE81MldaNm9MOU5nQ0hKRFpHUXRvZA1UwN09PVkxJYUV2TEhsdUlXSnRKcnhadHpUenFhYnlhUDJtUmFzV1U5Y3k5YmQ4YS1RTVVEc1B0cHk4cXlNanpOelQxZAkwzQQZDZD";
 const IG_USER_ID   = "17841470351044288";

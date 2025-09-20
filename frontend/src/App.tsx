@@ -6,6 +6,7 @@ import LoginPage from './components/auth/LoginPage';
 import Dashboard from './components/dashboard/Dashboard';
 import PrivacyPolicy from './components/legal/PrivacyPolicy';
 import { Toaster } from './components/ui/Toaster';
+import Setting from './components/dashboard/Setting';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -37,6 +38,7 @@ function App() {
     <Router>
       <AuthProvider>
         <Routes>
+          <Route path="/setting" element={<Setting/>} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/*" element={<AppContent />} />
         </Routes>

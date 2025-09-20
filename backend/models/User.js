@@ -19,10 +19,12 @@ const UserSchema = new mongoose.Schema({
         type: String, 
         unique: true 
     },
-    company_info:{
-        type:String,
-        required:false
-    },
+    ACCESS_TOKEN: { type: String },
+    IG_USER_ID: { type: String },
+    IG_USERNAME: { type: String },
+    IG_VERIFY_TOKEN: { type: String },
+    APP_SECRET: { type: String },
+    company_info:{type:String},
     resetToken: { 
         type: String, 
         default: null 

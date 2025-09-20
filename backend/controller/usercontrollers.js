@@ -216,64 +216,31 @@ exports.storeInstaUsername = async (req, res) => {
 
 
 
-// Post Instagram Comment
-exports.postComment = async (req, res) => {
-    const { mediaId, commentText } = req.body;
-    const userId = req.user.id;
-
-    if (!mediaId || !commentText) {
-        return res.status(400).json({ error: 'Media ID and comment text are required' });
-    }
-
-    if (commentText.length > 300) {
-        return res.status(400).json({ error: 'Comment cannot be longer than 300 characters' });
-    }
+exports.updateConnectionDetails = async (req, res) => {
+    console.log('Connection details request received:', req.body);
+    const { ACCESS_TOKEN, IG_USER_ID, IG_USERNAME, IG_VERIFY_TOKEN, APP_SECRET } = req.body;
+    const userId = req.user.id; // Get ID from authenticated user
 
     try {
-        // Get the user to verify they have an Instagram username
         const user = await User.findById(userId);
         if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).json({ error: "User not found" });
         }
 
-        if (!user.insta_username) {
-            return res.status(400).json({ error: 'Instagram username not set for this user' });
-        }
+        user.ACCESS_TOKEN = ACCESS_TOKEN;
+        user.IG_USER_ID = IG_USER_ID;
+        user.IG_USERNAME = IG_USERNAME;
+        user.IG_VERIFY_TOKEN = IG_VERIFY_TOKEN;
+        user.APP_SECRET = APP_SECRET;
 
-        // Instagram Graph API endpoint for posting comments
-        // Note: This requires the 'instagram_manage_comments' permission
-        const url = `https://graph.instagram.com/${mediaId}/comments`;
-        
-        const response = await axios.post(url, null, {
-            params: {
-                message: commentText,
-                access_token: "IGAARyPjOfdWNBZAE1qQVZAzWTk1UWFPUkV4MlVkZAWwzcXduZAE81MldaNm9MOU5nQ0hKRFpHUXRvZA1UwN09PVkxJYUV2TEhsdUlXSnRKcnhadHpUenFhYnlhUDJtUmFzV1U5Y3k5YmQ4YS1RTVVEc1B0cHk4cXlNanpOelQxZAkwzQQZDZD"
-            }
-        });
+        await user.save();
 
-        // If we reach here, the comment was posted successfully
-        res.status(200).json({
+        res.status(200).json({ 
             success: true,
-            message: 'Comment posted successfully',
-            comment: {
-                id: response.data.id,
-                text: commentText,
-                username: user.insta_username,
-                timestamp: new Date().toISOString()
-            }
+            message: 'Connection details updated successfully'
         });
-
     } catch (error) {
-        console.error('Error posting comment:', error.response?.data || error.message);
-        
-        let errorMessage = 'Error posting comment';
-        if (error.response?.data?.error) {
-            errorMessage = error.response.data.error.message || errorMessage;
-        }
-        
-        res.status(500).json({
-            success: false,
-            error: errorMessage
-        });
+        console.error("Error updating connection details:", error);
+        res.status(500).json({ error: "Error updating connection details" });
     }
 };
