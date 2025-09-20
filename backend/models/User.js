@@ -15,10 +15,6 @@ const UserSchema = new mongoose.Schema({
         type: String, 
         required: true 
     },
-    insta_username: { 
-        type: String, 
-        unique: true 
-    },
     ACCESS_TOKEN: { type: String },
     IG_USER_ID: { type: String },
     IG_USERNAME: { type: String },
