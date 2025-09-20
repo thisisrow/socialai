@@ -1,11 +1,11 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const axios = require('axios'); // Add axios to the requires
+const axios = require('axios'); 
 const User = require('../models/User');
 const dotenv = require("dotenv");
 dotenv.config();
 
-// User Registration
+
 exports.registerUser = async (req, res) => {
     console.log('Registration request received:', req.body);
     
