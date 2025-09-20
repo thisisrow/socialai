@@ -1,5 +1,6 @@
 import { useAuth } from '../../contexts/AuthContext';
 import { Instagram, Bell, Settings, LogOut } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -20,11 +21,13 @@ export default function Header() {
           <button className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg">
             <Bell className="w-5 h-5" />
           </button>
+          <Link to="/setting">
           <button
             className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
           >
             <Settings className="w-5 h-5" />
           </button>
+          </Link>
 
           <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
             <div className="text-right">

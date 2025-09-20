@@ -7,6 +7,7 @@ import Dashboard from './components/dashboard/Dashboard';
 import PrivacyPolicy from './components/legal/PrivacyPolicy';
 import { Toaster } from './components/ui/Toaster';
 import Setting from './components/dashboard/Setting';
+import DashboardLayout from './components/dashboard/DashboardLayout';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -21,15 +22,29 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {user ? (
-        <PostProvider>
-          <Dashboard />
-        </PostProvider>
-      ) : (
-        <LoginPage />
-      )}
+      <Routes>
+        {user ? (
+          <Route path="/*" element={<AuthenticatedApp />} />
+        ) : (
+          <Route path="/*" element={<LoginPage />} />
+        )}
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      </Routes>
       <Toaster />
     </div>
+  );
+}
+
+function AuthenticatedApp() {
+  return (
+    <PostProvider>
+      <Routes>
+        <Route path="/" element={<DashboardLayout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="/setting" element={<Setting />} />
+        </Route>
+      </Routes>
+    </PostProvider>
   );
 }
 
@@ -37,11 +52,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <Routes>
-          <Route path="/setting" element={<Setting/>} />
-          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-          <Route path="/*" element={<AppContent />} />
-        </Routes>
+        <AppContent />
       </AuthProvider>
     </Router>
   );

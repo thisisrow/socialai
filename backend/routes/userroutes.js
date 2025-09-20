@@ -6,5 +6,5 @@ const auth = require('../middleware/auth');
 router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.post('/username', auth, storeInstaUsername);
-router.post('/connectiondetaise', auth, updateConnectionDetails);
+router.post('/connectiondetails', auth, updateConnectionDetails);
 module.exports = router;
