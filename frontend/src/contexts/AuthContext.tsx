@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (username: string, password: string) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/users/login`, {
+            const response = await axios.post(`${API_BASE_URL}/users/login`, {
         username,
         password,
       });
@@ -62,24 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = async (username: string, email: string, password: string) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/users/register`, {
+      await axios.post(`${API_BASE_URL}/users/register`, {
         username,
         email,
         password,
       });
-      
-      const userData: User = {
-        id: response.data.user.id,
-        username: response.data.user.username,
-        email: response.data.user.email,
-        token: response.data.token
-      };
-      
-      setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
-      
-      // Set the default Authorization header for future requests
-      axios.defaults.headers.common['Authorization'] = `Bearer ${userData.token}`;
+      await login(username, password);
     } catch (error) {
       console.error('Signup error:', error);
       throw error;
