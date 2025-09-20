@@ -1,13 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = 'https://shortlisting-task-1-ten.vercel.app/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 interface User {
   id: string;
   username: string;
   email: string;
-  instagramUsername?: string;
+  instagramUsername?: string
   token?: string;
 }
 
@@ -37,15 +37,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (username: string, password: string) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/users/login`, {
+      const response = await axios.post(`${API_BASE_URL}/api/users/login`, {
         username,
         password,
       });
       
       const userData: User = {
-        id: response.data._id,
-        username: response.data.username,
-        email: response.data.email,
+        id: response.data.user._id,
+        username: response.data.user.username,
+        email: response.data.user.email,
         token: response.data.token
       };
       
@@ -62,16 +62,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = async (username: string, email: string, password: string) => {
     try {
-      const response = await axios.post(`${API_BASE_URL}/users/register`, {
+      const response = await axios.post(`${API_BASE_URL}/api/users/register`, {
         username,
         email,
         password,
       });
       
       const userData: User = {
-        id: response.data._id,
-        username: response.data.username,
-        email: response.data.email,
+        id: response.data.user.id,
+        username: response.data.user.username,
+        email: response.data.user.email,
         token: response.data.token
       };
       

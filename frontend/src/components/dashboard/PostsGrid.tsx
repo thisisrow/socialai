@@ -6,7 +6,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'; // ✅ import plugin
 
 dayjs.extend(relativeTime); // ✅ register plugin
 
-const API_BASE = 'https://shortlisting-task-1-ten.vercel.app';
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 type Comment = {
   id: string;
