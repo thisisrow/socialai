@@ -7,8 +7,12 @@ interface User {
   id: string;
   username: string;
   email: string;
-  instagramUsername?: string
   token?: string;
+  ACCESS_TOKEN?: string | null;
+  IG_USER_ID?: string | null;
+  IG_USERNAME?: string | null;
+  IG_VERIFY_TOKEN?: string | null;
+  APP_SECRET?: string | null;
 }
 
 interface AuthContextType {
@@ -17,7 +21,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   signup: (username: string, email: string, password: string) => Promise<void>;
   logout: () => void;
-  connectInstagram: (username: string) => Promise<void>;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -27,32 +31,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate loading user from localStorage
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      if (parsedUser.token) {
+        axios.defaults.headers.common['Authorization'] = `Bearer ${parsedUser.token}`;
+      }
     }
     setLoading(false);
   }, []);
 
   const login = async (username: string, password: string) => {
     try {
-            const response = await axios.post(`${API_BASE_URL}/users/login`, {
+      const response = await axios.post(`${API_BASE_URL}/users/login`, {
         username,
         password,
       });
       
       const userData: User = {
-        id: response.data.user._id,
+        id: response.data.user.id,
         username: response.data.user.username,
         email: response.data.user.email,
-        token: response.data.token
+        token: response.data.token,
+        ACCESS_TOKEN: response.data.user.ACCESS_TOKEN,
+        IG_USER_ID: response.data.user.IG_USER_ID,
+        IG_USERNAME: response.data.user.IG_USERNAME,
+        IG_VERIFY_TOKEN: response.data.user.IG_VERIFY_TOKEN,
+        APP_SECRET: response.data.user.APP_SECRET,
       };
       
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
       
-      // Set the default Authorization header for future requests
       axios.defaults.headers.common['Authorization'] = `Bearer ${userData.token}`;
     } catch (error) {
       console.error('Login error:', error);
@@ -62,12 +73,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signup = async (username: string, email: string, password: string) => {
     try {
-      await axios.post(`${API_BASE_URL}/users/register`, {
+      const response = await axios.post(`${API_BASE_URL}/users/register`, {
         username,
         email,
         password,
       });
-      await login(username, password);
+      const userData: User = {
+        id: response.data.user.id,
+        username: response.data.user.username,
+        email: response.data.user.email,
+        token: response.data.token,
+        ACCESS_TOKEN: response.data.user.ACCESS_TOKEN,
+        IG_USER_ID: response.data.user.IG_USER_ID,
+        IG_USERNAME: response.data.user.IG_USERNAME,
+        IG_VERIFY_TOKEN: response.data.user.IG_VERIFY_TOKEN,
+        APP_SECRET: response.data.user.APP_SECRET,
+      };
+      
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
+      
+      axios.defaults.headers.common['Authorization'] = `Bearer ${userData.token}`;
     } catch (error) {
       console.error('Signup error:', error);
       throw error;
@@ -77,20 +103,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     setUser(null);
     localStorage.removeItem('user');
+    delete axios.defaults.headers.common['Authorization'];
   };
 
-  const connectInstagram = async (username: string) => {
-    // Simulate Instagram connection
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    if (user) {
-      const updatedUser = {
-        ...user,
-        instagramUsername: username,
-      };
-      setUser(updatedUser);
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-    }
+  const updateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 
   return (
@@ -100,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       signup,
       logout,
-      connectInstagram,
+      updateUser,
     }}>
       {children}
     </AuthContext.Provider>

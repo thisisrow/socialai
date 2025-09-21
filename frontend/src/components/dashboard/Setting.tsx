@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useAuth } from '../../contexts/AuthContext';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 export default function Setting() {
+  const { user, updateUser } = useAuth();
   const [formData, setFormData] = useState({
     ACCESS_TOKEN: '',
     IG_USER_ID: '',
@@ -14,6 +16,18 @@ export default function Setting() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        ACCESS_TOKEN: user.ACCESS_TOKEN || '',
+        IG_USER_ID: user.IG_USER_ID || '',
+        IG_USERNAME: user.IG_USERNAME || '',
+        IG_VERIFY_TOKEN: user.IG_VERIFY_TOKEN || '',
+        APP_SECRET: user.APP_SECRET || '',
+      });
+    }
+  }, [user]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -23,7 +37,16 @@ export default function Setting() {
     setLoading(true);
     setMessage('');
     try {
-            await axios.post(`${API_BASE_URL}/users/connectiondetails`, formData);
+      await axios.post(`${API_BASE_URL}/users/connectiondetails`, formData);
+      
+      if(user) {
+        const updatedUser = {
+            ...user,
+            ...formData
+        }
+        updateUser(updatedUser);
+      }
+
       setMessage('Connection details saved successfully!');
     } catch (error: any) {
       setMessage(error.response?.data?.details || error.response?.data?.error || 'An error occurred while saving the details.');
