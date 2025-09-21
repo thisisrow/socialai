@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Heart, MessageCircle, Settings } from 'lucide-react';
+import { Heart, MessageCircle, Settings, PlusCircle } from 'lucide-react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
+import ContextModal from './ContextModal';
 
 dayjs.extend(relativeTime);
 
@@ -32,21 +33,21 @@ type Post = {
 export default function PostsGrid(): JSX.Element {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const { user } = useAuth();
 
   useEffect(() => {
     const fetchPosts = async () => {
-      if (!user || !user.ACCESS_TOKEN || !user.IG_USER_ID || !user.IG_USERNAME) {
+      if (!user || !user.token) {
         setLoading(false);
         return;
       }
 
       try {
         const res = await axios.get<{ success: boolean; data: Post[] }>(`${API_BASE}/posts`, {
-          params: {
-            accessToken: user.ACCESS_TOKEN,
-            igUserId: user.IG_USER_ID,
-            igUsername: user.IG_USERNAME,
+          headers: {
+            Authorization: `Bearer ${user.token}`,
           },
         });
         setPosts(res.data?.data ?? []);
@@ -61,6 +62,16 @@ export default function PostsGrid(): JSX.Element {
   }, [user]);
 
   const formatDate = (date: string) => dayjs(date).fromNow();
+
+  const handleOpenModal = (postId: string) => {
+    setSelectedPostId(postId);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedPostId(null);
+    setIsModalOpen(false);
+  };
 
   if (loading) {
     return (
@@ -128,9 +139,13 @@ export default function PostsGrid(): JSX.Element {
                     {formatDate(post.timestamp)}
                   </div>
                 </div>
+                 <button onClick={() => handleOpenModal(post.id)} className="flex items-center gap-2 text-blue-500 hover:underline mt-2">
+                    <PlusCircle className="w-5 h-5" />
+                    Add/Edit Context
+                  </button>
 
                 {post.comments.length > 0 && (
-                  <ul className="space-y-2 max-h-40 overflow-y-auto text-sm">
+                  <ul className="space-y-2 max-h-40 overflow-y-auto text-sm mt-4">
                     {post.comments.slice(0, 5).map(c => (
                       <li key={c.id} className="flex flex-col">
                         <div>
@@ -153,6 +168,9 @@ export default function PostsGrid(): JSX.Element {
             </div>
           ))}
         </div>
+      )}
+       {isModalOpen && selectedPostId && (
+        <ContextModal postId={selectedPostId} onClose={handleCloseModal} />
       )}
     </div>
   );
