@@ -9,7 +9,16 @@ dotenv.config();
 exports.registerUser = async (req, res) => {
     console.log('Registration request received:', req.body);
     
-    const { username, email, password } = req.body;
+    const { 
+        username, 
+        email, 
+        password,
+        ACCESS_TOKEN,
+        IG_USER_ID,
+        IG_USERNAME,
+        IG_VERIFY_TOKEN,
+        APP_SECRET
+    } = req.body;
     
     // Input validation
     if (!username || !email || !password) {
@@ -51,23 +60,53 @@ exports.registerUser = async (req, res) => {
         console.log('Creating new user...');
         const newUser = new User({ 
             username, 
-            email: email.toLowerCase(), // Ensure email is lowercase
-            password: hashedPassword 
+            email: email.toLowerCase(),
+            password: hashedPassword,
+            ACCESS_TOKEN,
+            IG_USER_ID,
+            IG_USERNAME,
+            IG_VERIFY_TOKEN,
+            APP_SECRET
         });
         
         console.log('Saving user to database...');
         await newUser.save();
         
         console.log('User registered successfully:', newUser.email);
-        res.status(201).json({ 
+        
+        // Generate token for the new user
+        const token = jwt.sign(
+            { id: newUser._id },
+            process.env.JWT_SECRET || 'your_jwt_secret',
+            { expiresIn: '1h' }
+        );
+
+        // Fetch the user with all fields to ensure we have the latest data
+        const userData = await User.findById(newUser._id).select(
+            'username email insta_username ACCESS_TOKEN IG_USER_ID IG_USERNAME IG_VERIFY_TOKEN APP_SECRET'
+        );
+        
+        console.log('User data from database:', JSON.stringify(userData, null, 2));
+        
+        const responseData = {
             success: true,
             message: 'User registered successfully',
+            token,
             user: {
-                id: newUser._id,
-                username: newUser.username,
-                email: newUser.email
+                id: userData._id,
+                username: userData.username,
+                email: userData.email,
+                instagramUsername: userData.IG_USERNAME || userData.insta_username || null,
+                ACCESS_TOKEN: userData.ACCESS_TOKEN || null,
+                IG_USER_ID: userData.IG_USER_ID || null,
+                IG_USERNAME: userData.IG_USERNAME || null,
+                IG_VERIFY_TOKEN: userData.IG_VERIFY_TOKEN || null,
+                APP_SECRET: userData.APP_SECRET || null
             }
-        });
+        };
+        
+        console.log('Sending response:', JSON.stringify(responseData, null, 2));
+        res.status(201).json(responseData);
         
     } catch (error) {
         console.error('Registration error:', {
@@ -85,23 +124,20 @@ exports.registerUser = async (req, res) => {
         // Handle specific MongoDB errors
         if (error.name === 'ValidationError') {
             errorMessage = 'Validation error';
-            Object.keys(error.errors).forEach(field => {
-                errorDetails[field] = error.errors[field].message;
+            Object.keys(error.errors).forEach(key => {
+                errorDetails[key] = error.errors[key].message;
             });
         } else if (error.code === 11000) {
             errorMessage = 'Duplicate key error';
-            errorDetails = {
-                field: Object.keys(error.keyPattern)[0],
-                value: error.keyValue[Object.keys(error.keyPattern)[0]]
-            };
+            errorDetails.field = Object.keys(error.keyPattern)[0];
+            errorDetails.value = error.keyValue[errorDetails.field];
         }
         
         res.status(500).json({ 
             success: false,
             error: errorMessage,
             details: errorDetails,
-            // Only include stack trace in development
-            ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 };
@@ -130,7 +166,7 @@ exports.loginUser = async (req, res) => {
             console.log('User not found:', username);
             return res.status(401).json({ 
                 success: false, 
-                error: 'Invalid credentials' // Generic message for security
+                error: 'Invalid credentials'
             });
         }
 
@@ -141,7 +177,7 @@ exports.loginUser = async (req, res) => {
             console.log('Invalid password for user:', username);
             return res.status(401).json({ 
                 success: false, 
-                error: 'Invalid credentials' // Generic message for security
+                error: 'Invalid credentials'
             });
         }
 
@@ -152,18 +188,31 @@ exports.loginUser = async (req, res) => {
             { expiresIn: '1h' }
         );
 
-        // Get user data without sensitive information
-        const userData = user.toObject();
-        delete userData.password;
-        delete userData.resetToken;
-        delete userData.resetTokenExpiry;
+        // Explicitly select all fields we want to return
+        const userData = await User.findById(user._id).select(
+            'username email insta_username ACCESS_TOKEN IG_USER_ID IG_USERNAME IG_VERIFY_TOKEN APP_SECRET'
+        );
 
-        console.log('Login successful for user:', user.username);
-        res.status(200).json({
+        console.log('User data from database:', JSON.stringify(userData, null, 2));
+        
+        const responseData = {
             success: true,
             token,
-            user: userData
-        });
+            user: {
+                id: user._id,
+                username: userData.username,
+                email: userData.email,
+                instagramUsername: userData.insta_username,
+                ACCESS_TOKEN: userData.ACCESS_TOKEN || null,
+                IG_USER_ID: userData.IG_USER_ID || null,
+                IG_USERNAME: userData.IG_USERNAME || null,
+                IG_VERIFY_TOKEN: userData.IG_VERIFY_TOKEN || null,
+                APP_SECRET: userData.APP_SECRET || null
+            }
+        };
+
+        console.log('Sending response:', JSON.stringify(responseData, null, 2));
+        res.status(200).json(responseData);
         
     } catch (error) {
         console.error('Login error:', {
