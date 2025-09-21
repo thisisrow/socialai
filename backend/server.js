@@ -3,45 +3,78 @@ const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
 const axios = require('axios');
-
+const jwt = require('jsonwebtoken');
 const userRoutes = require('./routes/userroutes');
 const connectDB = require('./connection/db');
+const User = require('./models/User');
 
-// ================== CONFIG (TEST ONLY – do NOT commit these) ================== ACCESS_TOKEN,IG_USER_ID,IG_USERNAME,IG_VERIFY_TOKEN,APP_SECRET
+// Configuration
 const PORT = process.env.PORT || 5000;
-const ACCESS_TOKEN = "IGAARyPjOfdWNBZAE1qQVZAzWTk1UWFPUkV4MlVkZAWwzcXduZAE81MldaNm9MOU5nQ0hKRFpHUXRvZA1UwN09PVkxJYUV2TEhsdUlXSnRKcnhadHpUenFhYnlhUDJtUmFzV1U5Y3k5YmQ4YS1RTVVEc1B0cHk4cXlNanpOelQxZAkwzQQZDZD";
-const IG_USER_ID   = "17841470351044288";
-const IG_USERNAME  = "let.be.crazy";
-const IG_VERIFY_TOKEN = "kjabkjaBsoiaNIABIXIUABBXAVFGFGWEGFGDD";
-const APP_SECRET      = "c0f05657a7ed375ed614576e9c467fd8";
-// ==============================================================================
-
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 const app = express();
 
+// Middleware
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// ================== Connect DB ==================
+// Connect to Database
 connectDB();
 
-// ================== Routes ==================
-app.use('/users', userRoutes);
-app.get('/', (req, res) => res.send('hello world'));
-
-// ================== REST: posts (get all details) ==================
-app.get('/posts', async (req, res) => {
+// Auth Middleware
+const auth = async (req, res, next) => {
   try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(401).json({ success: false, error: 'No token provided' });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found' });
+    }
+
+    req.user = user;
+    req.token = token;
+    next();
+  } catch (error) {
+    console.error('Auth error:', error);
+    res.status(401).json({ success: false, error: 'Not authorized' });
+  }
+};
+
+// Routes
+app.use('/users', userRoutes);
+
+// Simple test route
+app.get('/', (req, res) => res.send('SocialSync API is running'));
+
+// Get posts endpoint - now uses authenticated user's credentials
+app.get('/posts', auth, async (req, res) => {
+  try {
+    // Get Instagram credentials from the authenticated user
+    const { ACCESS_TOKEN, IG_USER_ID, IG_USERNAME } = req.user;
+    
+    if (!ACCESS_TOKEN || !IG_USER_ID || !IG_USERNAME) {
+      return res.status(400).json({
+        success: false,
+        error: 'Instagram credentials not found. Please update your connection details.'
+      });
+    }
+
     const fields = "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count";
     const url = `https://graph.instagram.com/${IG_USER_ID}/media?fields=${fields}&access_token=${ACCESS_TOKEN}`;
+    
     const { data: list } = await axios.get(url);
     const items = list.data || [];
 
     const shaped = await Promise.all(items.map(async (p) => {
       let comments = [];
       try {
-        const cu = `https://graph.instagram.com/${p.id}/comments?fields=id,text,username,timestamp&access_token=${ACCESS_TOKEN}`;
-        const { data: cRes } = await axios.get(cu);
+        const commentsUrl = `https://graph.instagram.com/${p.id}/comments?fields=id,text,username,timestamp&access_token=${ACCESS_TOKEN}`;
+        const { data: cRes } = await axios.get(commentsUrl);
         comments = (cRes.data || []).map(c => ({
           id: c.id,
           text: c.text || '',
@@ -50,7 +83,10 @@ app.get('/posts', async (req, res) => {
           isMine: (c.username || '').toLowerCase() === IG_USERNAME.toLowerCase()
         }));
         comments.sort((a,b) => (b.timestamp||'').localeCompare(a.timestamp||''));
-      } catch (_) { comments = []; }
+      } catch (error) {
+        console.error(`Error fetching comments for post ${p.id}:`, error.message);
+        comments = [];
+      }
 
       return {
         id: p.id,
@@ -61,17 +97,41 @@ app.get('/posts', async (req, res) => {
         timestamp: p.timestamp,
         likes: p.like_count ?? 0,
         commentsCount: p.comments_count ?? comments.length,
-        comments
+        comments: comments.slice(0, 5),
+        isLiked: false,
+        isSaved: false
       };
     }));
 
-    res.json({ success: true, data: shaped });
+    res.json({ 
+      success: true, 
+      data: shaped,
+      meta: {
+        total: shaped.length,
+        hasMore: list.paging?.next ? true : false
+      }
+    });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.response?.data || error.message });
+    console.error('Error in /posts endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch posts',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
-// ================== Start ==================
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    error: 'Something went wrong!',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log('Server is running on port', PORT);
+  console.log(`Server running on port ${PORT}`);
 });
