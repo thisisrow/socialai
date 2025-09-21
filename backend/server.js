@@ -2,11 +2,14 @@
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
+const { auth } = require('./middleware/auth');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const userRoutes = require('./routes/userroutes');
+const contextRoutes = require('./routes/contextroutes');
 const connectDB = require('./connection/db');
-const User = require('./models/User');
+
+
 
 // Configuration
 const PORT = process.env.PORT || 5000;
@@ -21,29 +24,7 @@ app.use(express.json());
 // Connect to Database
 connectDB();
 
-// Auth Middleware
-const auth = async (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'No token provided' });
-    }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    
-    if (!user) {
-      return res.status(401).json({ success: false, error: 'User not found' });
-    }
-
-    req.user = user;
-    req.token = token;
-    next();
-  } catch (error) {
-    console.error('Auth error:', error);
-    res.status(401).json({ success: false, error: 'Not authorized' });
-  }
-};
 
 // Routes
 app.use('/users', userRoutes);
@@ -54,7 +35,7 @@ app.get('/', (req, res) => res.send('SocialSync API is running'));
 // Get posts endpoint - now uses authenticated user's credentials
 app.get('/posts', auth, async (req, res) => {
   try {
-    // Get Instagram credentials from the authenticated user
+
     const { ACCESS_TOKEN, IG_USER_ID, IG_USERNAME } = req.user;
     
     if (!ACCESS_TOKEN || !IG_USER_ID || !IG_USERNAME) {
