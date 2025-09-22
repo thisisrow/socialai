@@ -70,3 +70,20 @@ exports.deleteContext = async (req, res) => {
         res.status(500).json({ success: false, error: 'Server Error' });
     }
 };
+
+// Toggle automation for a post
+exports.toggleAutomation = async (req, res) => {
+    try {
+        const context = await Context.findOne({ postId: req.params.postId, user: req.user.id });
+        if (!context) {
+            return res.status(404).json({ success: false, error: 'Context not found' });
+        }
+
+        context.automation = !context.automation;
+        await context.save();
+
+        res.status(200).json({ success: true, data: context });
+    } catch (error) {
+        res.status(500).json({ success: false, error: 'Server Error' });
+    }
+};

@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Heart, MessageCircle, Settings, PlusCircle } from 'lucide-react';
-import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
+import { Settings } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import ContextModal from './ContextModal';
-
-dayjs.extend(relativeTime);
+import PostCard from './PostCard';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
@@ -33,8 +29,6 @@ type Post = {
 export default function PostsGrid(): JSX.Element {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -60,18 +54,6 @@ export default function PostsGrid(): JSX.Element {
 
     fetchPosts();
   }, [user]);
-
-  const formatDate = (date: string) => dayjs(date).fromNow();
-
-  const handleOpenModal = (postId: string) => {
-    setSelectedPostId(postId);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setSelectedPostId(null);
-    setIsModalOpen(false);
-  };
 
   if (loading) {
     return (
@@ -111,66 +93,9 @@ export default function PostsGrid(): JSX.Element {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {posts.map(post => (
-            <div
-              key={post.id}
-              className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-shadow duration-300"
-            >
-              <img
-                src={post.imageUrl}
-                alt={post.caption || 'Post'}
-                className="w-full h-64 object-cover transition-transform duration-300 hover:scale-105"
-              />
-
-              <div className="p-4">
-                <p className="text-gray-800 text-lg font-medium mb-3">{post.caption}</p>
-
-                <div className="flex items-center justify-between text-gray-600 text-sm mb-2">
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                      <Heart className="w-5 h-5 text-red-500" />
-                      <span>{post.likes}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <MessageCircle className="w-5 h-5 text-blue-500" />
-                      <span>{post.commentsCount}</span>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    {formatDate(post.timestamp)}
-                  </div>
-                </div>
-                 <button onClick={() => handleOpenModal(post.id)} className="flex items-center gap-2 text-blue-500 hover:underline mt-2">
-                    <PlusCircle className="w-5 h-5" />
-                    Add/Edit Context
-                  </button>
-
-                {post.comments.length > 0 && (
-                  <ul className="space-y-2 max-h-40 overflow-y-auto text-sm mt-4">
-                    {post.comments.slice(0, 5).map(c => (
-                      <li key={c.id} className="flex flex-col">
-                        <div>
-                          <span className="font-semibold text-gray-900">{c.username}</span>{' '}
-                          <span className="text-gray-700">{c.text}</span>
-                        </div>
-                        <span className="text-xs text-gray-400 ml-1">
-                          {formatDate(c.timestamp)}
-                        </span>
-                      </li>
-                    ))}
-                    {post.comments.length > 5 && (
-                      <li className="text-sm text-blue-500 cursor-pointer mt-2">
-                        <button>Show more comments</button>
-                      </li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            </div>
+            <PostCard key={post.id} post={post} />
           ))}
         </div>
-      )}
-       {isModalOpen && selectedPostId && (
-        <ContextModal postId={selectedPostId} onClose={handleCloseModal} />
       )}
     </div>
   );

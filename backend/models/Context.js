@@ -13,6 +13,10 @@ const contextSchema = new mongoose.Schema({
     context: {
         type: String,
         default: ''
+    },
+    automation:{
+        type:Boolean,
+        default:false
     }
 }, { timestamps: true });
 

@@ -1,7 +1,7 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { PostProvider } from './contexts/PostContext';
+
 import LoginPage from './components/auth/LoginPage';
 import Dashboard from './components/dashboard/Dashboard';
 import PrivacyPolicy from './components/legal/PrivacyPolicy';
@@ -37,14 +37,12 @@ function AppContent() {
 
 function AuthenticatedApp() {
   return (
-    <PostProvider>
       <Routes>
         <Route path="/" element={<DashboardLayout />}>
           <Route index element={<Dashboard />} />
           <Route path="/setting" element={<Setting />} />
         </Route>
       </Routes>
-    </PostProvider>
   );
 }
 
