@@ -1,125 +1,137 @@
 {
-  "endpoints": [
+  "backend_apis": [
     {
       "path": "/",
       "method": "GET",
-      "description": "A simple welcome/health-check endpoint.",
-      "response": {
-        "type": "text/plain",
-        "example": "hello world"
-      }
+      "description": "Simple test route to check if the API is running.",
+      "controller": "N/A"
     },
     {
       "path": "/posts",
       "method": "GET",
-      "description": "Fetches all media posts from the configured Instagram account, including details like likes, comments count, and the comments themselves. It interacts with the Instagram Graph API.",
-      "response": {
-        "success": {
-          "status": 200,
-          "body": {
-            "success": true,
-            "data": [
-              {
-                "id": "string",
-                "caption": "string",
-                "mediaType": "string",
-                "imageUrl": "string",
-                "permalink": "string",
-                "timestamp": "string",
-                "likes": "number",
-                "commentsCount": "number",
-                "comments": [
-                  {
-                    "id": "string",
-                    "text": "string",
-                    "username": "string",
-                    "timestamp": "string",
-                    "isMine": "boolean"
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        "error": {
-          "status": 500,
-          "body": {
-            "success": false,
-            "error": "object or string containing error details from Instagram API or a message."
-          }
-        }
+      "description": "Fetches Instagram posts for the authenticated user.",
+      "controller": "server.js (inline)",
+      "authentication_required": true
+    },
+    {
+      "path": "/users/register",
+      "method": "POST",
+      "description": "Registers a new user with username, email, and password. Optionally accepts Instagram connection details.",
+      "controller": "usercontrollers.registerUser",
+      "authentication_required": false,
+      "request_body": {
+        "username": "string",
+        "email": "string",
+        "password": "string",
+        "ACCESS_TOKEN": "string (optional)",
+        "IG_USER_ID": "string (optional)",
+        "IG_USERNAME": "string (optional)",
+        "IG_VERIFY_TOKEN": "string (optional)",
+        "APP_SECRET": "string (optional)"
       }
     },
     {
-      "path": "/api/users/register",
+      "path": "/users/login",
       "method": "POST",
-      "description": "Registers a new user.",
-      "request": {
-        "body": {
-          "email": "string",
-          "password": "string"
-        }
-      },
-      "response": {
-        "success": {
-          "status": 201,
-          "body": {
-            "success": true,
-            "token": "string (JWT)"
-          }
-        },
-        "error": {
-          "status": 400,
-          "body": {
-            "success": false,
-            "error": "Error message (e.g., 'User already exists')."
-          }
-        }
+      "description": "Logs in a user with username and password, returning a JWT token and user details.",
+      "controller": "usercontrollers.loginUser",
+      "authentication_required": false,
+      "request_body": {
+        "username": "string",
+        "password": "string"
       }
     },
     {
-      "path": "/api/users/login",
+      "path": "/users/username",
       "method": "POST",
-      "description": "Authenticates a user and returns a token.",
-      "request": {
-        "body": {
-          "email": "string",
-          "password": "string"
-        }
-      },
-      "response": {
-        "success": {
-          "status": 200,
-          "body": {
-            "success": true,
-            "token": "string (JWT)"
-          }
-        },
-        "error": {
-          "status": 401,
-          "body": {
-            "success": false,
-            "error": "Error message (e.g., 'Invalid credentials')."
-          }
-        }
+      "description": "Stores the Instagram username for the authenticated user.",
+      "controller": "usercontrollers.storeInstaUsername",
+      "authentication_required": true,
+      "request_body": {
+        "insta_username": "string"
       }
     },
     {
-      "path": "/api/users/username",
+      "path": "/users/connectiondetails",
       "method": "POST",
-      "description": "Stores an Instagram username for the user. (Note: Authentication middleware is currently commented out in the source).",
-      "request": {
-        "body": {
-          "username": "string"
-        }
-      },
-      "response": {
-        "status": 200,
-        "body": {
-          "success": true,
-          "message": "Username stored successfully."
-        }
+      "description": "Updates Instagram connection details (ACCESS_TOKEN, IG_USER_ID, IG_USERNAME, IG_VERIFY_TOKEN, APP_SECRET) for the authenticated user.",
+      "controller": "usercontrollers.updateConnectionDetails",
+      "authentication_required": true,
+      "request_body": {
+        "ACCESS_TOKEN": "string",
+        "IG_USER_ID": "string",
+        "IG_USERNAME": "string",
+        "IG_VERIFY_TOKEN": "string (optional)",
+        "APP_SECRET": "string (optional)"
       }
+    },
+    {
+      "path": "/context/:postId",
+      "method": "GET",
+      "description": "Retrieves the context for a specific post for the authenticated user.",
+      "controller": "contextcontroller.getContext",
+      "authentication_required": true,
+      "path_parameters": {
+        "postId": "string (ID of the post)"
+      }
+    },
+    {
+      "path": "/context",
+      "method": "POST",
+      "description": "Adds new context to a post for the authenticated user.",
+      "controller": "contextcontroller.addContext",
+      "authentication_required": true,
+      "request_body": {
+        "postId": "string",
+        "context": "object"
+      }
+    },
+    {
+      "path": "/context/:postId",
+      "method": "PUT",
+      "description": "Updates the context for a specific post for the authenticated user.",
+      "controller": "contextcontroller.updateContext",
+      "authentication_required": true,
+      "path_parameters": {
+        "postId": "string (ID of the post)"
+      },
+      "request_body": {
+        "context": "object"
+      }
+    },
+    {
+      "path": "/context/:postId",
+      "method": "DELETE",
+      "description": "Deletes the context for a specific post for the authenticated user.",
+      "controller": "contextcontroller.deleteContext",
+      "authentication_required": true,
+      "path_parameters": {
+        "postId": "string (ID of the post)"
+      }
+    },
+    {
+      "path": "/context/:postId/toggle-automation",
+      "method": "PUT",
+      "description": "Toggles the automation status for a specific post's context for the authenticated user.",
+      "controller": "contextcontroller.toggleAutomation",
+      "authentication_required": true,
+      "path_parameters": {
+        "postId": "string (ID of the post)"
+      }
+    },
+    {
+      "path": "/webhook/get",
+      "method": "GET",
+      "description": "Verifies the webhook endpoint.",
+      "controller": "webhookController.verifyWebhook",
+      "authentication_required": false
+    },
+    {
+      "path": "/webhook/webhook",
+      "method": "POST",
+      "description": "Handles incoming webhook messages.",
+      "controller": "webhookController.handleWebhook",
+      "authentication_required": false
     }
   ]
 }
