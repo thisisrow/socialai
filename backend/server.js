@@ -6,6 +6,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const userRoutes = require('./routes/userroutes');
 const contextRouter = require('./routes/contextrouter');
+const webhookRoutes = require('./routes/webhookRoutes');
 const connectDB = require('./connection/db');
 const User = require('./models/User');
 
@@ -49,6 +50,7 @@ const auth = async (req, res, next) => {
 // Routes
 app.use('/users', userRoutes);
 app.use('/context', contextRouter);
+app.use('/webhook', webhookRoutes);
 
 // Simple test route
 app.get('/', (req, res) => res.send('SocialSync API is running'));
