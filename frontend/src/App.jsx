@@ -45,6 +45,14 @@ function App() {
     }
   }, [])
 
+  const clearCodeFromUrl = () => {
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('code')) {
+      url.searchParams.delete('code')
+      window.history.replaceState({}, document.title, url.toString())
+    }
+  }
+
   const fetchMedia = useCallback(async (igUserId, token) => {
     try {
       const usingBasicToken = token.startsWith('IG') || isBasicDisplayToken
@@ -150,6 +158,7 @@ function App() {
       setUserId(String(data.user_id))
       localStorage.setItem('ig_access_token', data.access_token)
       localStorage.setItem('ig_user_id', String(data.user_id))
+      clearCodeFromUrl()
       setStatus('Access token received. Loading recent posts...')
       fetchMedia(data.user_id, data.access_token)
     } catch (err) {
@@ -160,8 +169,12 @@ function App() {
 
   useEffect(() => {
     if (!authCode) return
+    if (accessToken) {
+      clearCodeFromUrl()
+      return
+    }
     exchangeCodeForToken(authCode)
-  }, [authCode, exchangeCodeForToken])
+  }, [authCode, exchangeCodeForToken, accessToken])
 
   useEffect(() => {
     // Restore from localStorage to avoid re-authenticating on refresh while the token is valid.
