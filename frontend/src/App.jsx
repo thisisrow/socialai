@@ -21,6 +21,7 @@ function App() {
   const [media, setMedia] = useState([])
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const [commentsById, setCommentsById] = useState({})
   const isBasicDisplayToken = useMemo(() => accessToken?.startsWith('IG'), [accessToken])
 
   const loginUrl = useMemo(() => {
@@ -52,6 +53,51 @@ function App() {
       window.history.replaceState({}, document.title, url.toString())
     }
   }
+
+  const fetchCommentsForMedia = useCallback(async (mediaId, token) => {
+    if (!token) return
+    setCommentsById((prev) => ({
+      ...prev,
+      [mediaId]: { ...prev[mediaId], loading: true, error: '', comments: prev[mediaId]?.comments || [] },
+    }))
+
+    try {
+      const params = new URLSearchParams({
+        fields: 'id,text,username,timestamp,like_count',
+        access_token: token,
+        limit: '50',
+      })
+      const url = `https://graph.facebook.com/v19.0/${mediaId}/comments?${params.toString()}`
+      const resp = await fetch(url)
+      if (!resp.ok) {
+        const message = await resp.text()
+        throw new Error(message || 'Failed to load comments')
+      }
+      const json = await resp.json()
+      setCommentsById((prev) => ({
+        ...prev,
+        [mediaId]: { loading: false, error: '', comments: json?.data || [] },
+      }))
+    } catch (err) {
+      setCommentsById((prev) => ({
+        ...prev,
+        [mediaId]: { loading: false, error: err?.message || 'Failed to load comments', comments: [] },
+      }))
+    }
+  }, [])
+
+  const loadCommentsForMediaList = useCallback(
+    (items, token, usingBasicToken) => {
+      if (usingBasicToken) return
+      if (!Array.isArray(items)) return
+      items.forEach((item) => {
+        if (item?.id) {
+          fetchCommentsForMedia(item.id, token)
+        }
+      })
+    },
+    [fetchCommentsForMedia],
+  )
 
   const fetchMedia = useCallback(async (igUserId, token) => {
     try {
@@ -94,11 +140,12 @@ function App() {
       const data = await response.json()
       setMedia(data?.data || [])
       setStatus(usingBasicToken ? 'Connected (basic token: comments unavailable)' : 'Connected')
+      loadCommentsForMediaList(data?.data, token, usingBasicToken)
     } catch (err) {
       setError(err?.message || 'Unable to load posts.')
       setStatus('')
     }
-  }, [isBasicDisplayToken])
+  }, [isBasicDisplayToken, loadCommentsForMediaList])
 
   const handleLogout = () => {
     localStorage.removeItem('ig_access_token')
@@ -261,19 +308,32 @@ function App() {
               <p className="timestamp">{item.timestamp}</p>
               {isBasicDisplayToken ? (
                 <p className="muted small">Comments are not returned with this (Basic Display) token.</p>
-              ) : item.comments?.data?.length ? (
-                <div className="comments">
-                  <p className="label">Recent comments</p>
-                  <ul>
-                    {item.comments.data.map((comment) => (
-                      <li key={comment.id}>
-                        <span className="comment-user">{comment.username}</span>: {comment.text}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               ) : (
-                <p className="muted small">No comments fetched.</p>
+                <div className="comments">
+                  <div className="comments-header">
+                    <p className="label">Comments</p>
+                    <button
+                      className="ghost-btn small-btn"
+                      type="button"
+                      onClick={() => fetchCommentsForMedia(item.id, accessToken)}
+                    >
+                      Reload
+                    </button>
+                  </div>
+                  {commentsById[item.id]?.loading && <p className="muted small">Loading comments...</p>}
+                  {commentsById[item.id]?.error && <p className="error-text small">Error: {commentsById[item.id].error}</p>}
+                  {commentsById[item.id]?.comments?.length ? (
+                    <ul>
+                      {commentsById[item.id].comments.map((comment) => (
+                        <li key={comment.id}>
+                          <span className="comment-user">{comment.username}</span>: {comment.text}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    !commentsById[item.id]?.loading && <p className="muted small">No comments fetched.</p>
+                  )}
+                </div>
               )}
             </article>
           ))}

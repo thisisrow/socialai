@@ -216,6 +216,13 @@ a {
   padding: 10px;
 }
 
+.comments-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
 .comments ul {
   list-style: none;
   padding: 0;
@@ -228,6 +235,15 @@ a {
 .comment-user {
   color: #bfdbfe;
   font-weight: 600;
+}
+
+.small-btn {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.error-text {
+  color: #fca5a5;
 }
 
 .muted {
