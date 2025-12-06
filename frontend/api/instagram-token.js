@@ -11,7 +11,7 @@ export default async function handler(req, res) {
 
   const { code, redirect_uri: redirectUri, client_id: clientIdFromBody } = req.body || {}
   const clientId = process.env.INSTAGRAM_APP_ID || clientIdFromBody
-  const clientSecret = process.env.INSTAGRAM_APP_SECRET
+  const clientSecret = process.env.INSTAGRAM_APP_SECRET || process.env.APP_SECRET
 
   if (!clientSecret) {
     return res.status(500).json({ error: 'Missing INSTAGRAM_APP_SECRET on the server.' })

@@ -60,7 +60,11 @@ function App() {
         'comments.limit(5){id,text,username,timestamp}',
       ]
 
-      const url = `https://graph.facebook.com/v19.0/${igUserId}/media?fields=${fields.join(',')}&access_token=${token}`
+      const params = new URLSearchParams({
+        fields: fields.join(','),
+        access_token: token,
+      })
+      const url = `https://graph.facebook.com/v19.0/${igUserId}/media?${params.toString()}`
       const response = await fetch(url)
 
       if (!response.ok) {
