@@ -46,7 +46,12 @@ function App() {
 
   const fetchMedia = useCallback(async (igUserId, token) => {
     try {
-      setStatus('Fetching media and comments...')
+      const isBasicDisplayToken = token.startsWith('IG')
+      setStatus(
+        isBasicDisplayToken
+          ? 'Fetching media via graph.instagram.com (comments are not available with this token)...'
+          : 'Fetching media and comments...',
+      )
       setError('')
 
       const fields = [
@@ -60,11 +65,16 @@ function App() {
         'comments.limit(5){id,text,username,timestamp}',
       ]
 
+      const basicDisplayFields = ['id', 'caption', 'media_type', 'media_url', 'permalink', 'thumbnail_url', 'timestamp', 'username']
+
       const params = new URLSearchParams({
-        fields: fields.join(','),
+        fields: (isBasicDisplayToken ? basicDisplayFields : fields).join(','),
         access_token: token,
       })
-      const url = `https://graph.facebook.com/v19.0/${igUserId}/media?${params.toString()}`
+
+      const baseUrl = isBasicDisplayToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com/v19.0'
+      const path = isBasicDisplayToken ? 'me/media' : `${igUserId}/media`
+      const url = `${baseUrl}/${path}?${params.toString()}`
       const response = await fetch(url)
 
       if (!response.ok) {
@@ -80,6 +90,15 @@ function App() {
       setStatus('')
     }
   }, [])
+
+  const handleLogout = () => {
+    localStorage.removeItem('ig_access_token')
+    localStorage.removeItem('ig_user_id')
+    setAccessToken('')
+    setUserId('')
+    setMedia([])
+    setStatus('Logged out. Connect again to reload data.')
+  }
 
   const exchangeCodeForToken = useCallback(async (code) => {
     try {
@@ -163,9 +182,16 @@ function App() {
             Connect your Instagram professional account, then we’ll pull a few posts and their recent comments as JSON for inspection.
           </p>
         </div>
-        <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, '_self')}>
-          Connect account
-        </button>
+        <div className="header-actions">
+          <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, '_self')}>
+            Connect account
+          </button>
+          {accessToken && (
+            <button className="ghost-btn" type="button" onClick={handleLogout}>
+              Log out
+            </button>
+          )}
+        </div>
       </header>
 
       <section className="status-bar">
