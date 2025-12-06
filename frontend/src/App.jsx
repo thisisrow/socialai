@@ -3,7 +3,8 @@ import './App.css'
 
 const APP_ID = '1251511386469731'
 const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
-const APP_SECRET = 'c0f05657a7ed375ed614576e9c467fd8'
+const APP_SECRET = import.meta.env.VITE_IG_APP_SECRET
+const TOKEN_ENDPOINT = import.meta.env.VITE_IG_TOKEN_ENDPOINT || '/api/instagram-token' // server-side endpoint to avoid CORS
 
 const scopes = [
   'instagram_business_basic',
@@ -77,23 +78,36 @@ function App() {
   }, [])
 
   const exchangeCodeForToken = useCallback(async (code) => {
-    if (!APP_SECRET) {
-      setError('Add VITE_IG_APP_SECRET to your environment (server-side recommended) to exchange the code for a token.')
-      setStatus('')
-      return
-    }
-
     try {
       setError('')
+
       const body = new URLSearchParams({
         client_id: APP_ID,
-        client_secret: APP_SECRET,
-        grant_type: 'authorization_code',
         redirect_uri: REDIRECT_URI,
         code,
       })
 
-      const response = await fetch('https://api.instagram.com/oauth/access_token', {
+      let url = 'https://api.instagram.com/oauth/access_token'
+
+      if (TOKEN_ENDPOINT) {
+        // Prefer your own serverless endpoint to avoid CORS with api.instagram.com
+        url = TOKEN_ENDPOINT
+      } else if (APP_SECRET) {
+        body.append('client_secret', APP_SECRET)
+        body.append('grant_type', 'authorization_code')
+      } else {
+        setError(
+          'Set VITE_IG_TOKEN_ENDPOINT to a server-side token exchange endpoint (recommended) or VITE_IG_APP_SECRET for local dev.',
+        )
+        setStatus('')
+        return
+      }
+
+      if (!body.get('grant_type')) {
+        body.append('grant_type', 'authorization_code')
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
         body,
       })
@@ -104,6 +118,10 @@ function App() {
       }
 
       const data = await response.json()
+      if (!data.access_token || !data.user_id) {
+        throw new Error('Token endpoint did not return access_token and user_id.')
+      }
+
       setAccessToken(data.access_token)
       setUserId(String(data.user_id))
       localStorage.setItem('ig_access_token', data.access_token)
