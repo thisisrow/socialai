@@ -21,6 +21,7 @@ function App() {
   const [media, setMedia] = useState([])
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
+  const isBasicDisplayToken = useMemo(() => accessToken?.startsWith('IG'), [accessToken])
 
   const loginUrl = useMemo(() => {
     const params = new URLSearchParams({
@@ -46,9 +47,9 @@ function App() {
 
   const fetchMedia = useCallback(async (igUserId, token) => {
     try {
-      const isBasicDisplayToken = token.startsWith('IG')
+      const usingBasicToken = token.startsWith('IG') || isBasicDisplayToken
       setStatus(
-        isBasicDisplayToken
+        usingBasicToken
           ? 'Fetching media via graph.instagram.com (comments are not available with this token)...'
           : 'Fetching media and comments...',
       )
@@ -68,12 +69,12 @@ function App() {
       const basicDisplayFields = ['id', 'caption', 'media_type', 'media_url', 'permalink', 'thumbnail_url', 'timestamp', 'username']
 
       const params = new URLSearchParams({
-        fields: (isBasicDisplayToken ? basicDisplayFields : fields).join(','),
+        fields: (usingBasicToken ? basicDisplayFields : fields).join(','),
         access_token: token,
       })
 
-      const baseUrl = isBasicDisplayToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com/v19.0'
-      const path = isBasicDisplayToken ? 'me/media' : `${igUserId}/media`
+      const baseUrl = usingBasicToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com/v19.0'
+      const path = usingBasicToken ? 'me/media' : `${igUserId}/media`
       const url = `${baseUrl}/${path}?${params.toString()}`
       const response = await fetch(url)
 
@@ -84,12 +85,12 @@ function App() {
 
       const data = await response.json()
       setMedia(data?.data || [])
-      setStatus('')
+      setStatus(usingBasicToken ? 'Connected (basic token: comments unavailable)' : 'Connected')
     } catch (err) {
       setError(err?.message || 'Unable to load posts.')
       setStatus('')
     }
-  }, [])
+  }, [isBasicDisplayToken])
 
   const handleLogout = () => {
     localStorage.removeItem('ig_access_token')
@@ -169,6 +170,7 @@ function App() {
     if (storedToken && storedUserId && !accessToken) {
       setAccessToken(storedToken)
       setUserId(storedUserId)
+      setStatus('Restored session. Loading posts...')
       fetchMedia(storedUserId, storedToken)
     }
   }, [accessToken, fetchMedia])
@@ -197,7 +199,8 @@ function App() {
       <section className="status-bar">
         {status && <div className="status-chip">{status}</div>}
         {error && <div className="error-chip">Error: {error}</div>}
-        {!status && !error && <div className="status-chip muted">Waiting for login...</div>}
+        {!status && !error && !accessToken && <div className="status-chip muted">Waiting for login...</div>}
+        {!status && accessToken && !error && <div className="status-chip">Connected</div>}
       </section>
 
       <section className="token-box">
@@ -243,7 +246,9 @@ function App() {
               <p className="caption">{item.caption || 'No caption'}</p>
               {item.media_url && <img className="media-img" src={item.media_url} alt={item.caption || 'Instagram media'} />}
               <p className="timestamp">{item.timestamp}</p>
-              {item.comments?.data?.length ? (
+              {isBasicDisplayToken ? (
+                <p className="muted small">Comments are not returned with this (Basic Display) token.</p>
+              ) : item.comments?.data?.length ? (
                 <div className="comments">
                   <p className="label">Recent comments</p>
                   <ul>
