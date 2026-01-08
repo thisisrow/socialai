@@ -54,7 +54,7 @@ function App() {
     }
   }
 
-  const fetchCommentsForMedia = useCallback(async (mediaId, token) => {
+  const fetchCommentsForMedia = useCallback(async (mediaId, token, usingBasicToken = false) => {
     if (!token) return
     setCommentsById((prev) => ({
       ...prev,
@@ -67,7 +67,10 @@ function App() {
         access_token: token,
         limit: '50',
       })
-      const url = `https://graph.instagram.com/${mediaId}/comments?${params.toString()}`
+
+      // Use graph.instagram.com for Basic Display / IG tokens, otherwise use the Facebook Graph endpoint
+      const baseUrl = 'https://graph.instagram.com'
+      const url = `${baseUrl}/${mediaId}/comments?${params.toString()}`
       const resp = await fetch(url)
       if (!resp.ok) {
         const message = await resp.text()
@@ -88,11 +91,10 @@ function App() {
 
   const loadCommentsForMediaList = useCallback(
     (items, token, usingBasicToken) => {
-      if (usingBasicToken) return
       if (!Array.isArray(items)) return
       items.forEach((item) => {
         if (item?.id) {
-          fetchCommentsForMedia(item.id, token)
+          fetchCommentsForMedia(item.id, token, usingBasicToken)
         }
       })
     },
@@ -127,7 +129,7 @@ function App() {
         access_token: token,
       })
 
-      const baseUrl = usingBasicToken ? 'https://graph.instagram.com' : 'https://graph.facebook.com/v19.0'
+      const baseUrl = 'https://graph.instagram.com'
       const path = usingBasicToken ? 'me/media' : `${igUserId}/media`
       const url = `${baseUrl}/${path}?${params.toString()}`
       const response = await fetch(url)
@@ -315,7 +317,7 @@ function App() {
                     <button
                       className="ghost-btn small-btn"
                       type="button"
-                      onClick={() => fetchCommentsForMedia(item.id, accessToken)}
+                      onClick={() => fetchCommentsForMedia(item.id, accessToken, isBasicDisplayToken)}
                     >
                       Reload
                     </button>
