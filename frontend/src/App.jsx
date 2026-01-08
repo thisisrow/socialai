@@ -67,7 +67,7 @@ function App() {
         access_token: token,
         limit: '50',
       })
-      const url = `https://graph.facebook.com/v19.0/${mediaId}/comments?${params.toString()}`
+      const url = `https://graph.instagram.com/${mediaId}/comments?${params.toString()}`
       const resp = await fetch(url)
       if (!resp.ok) {
         const message = await resp.text()
