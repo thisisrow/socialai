@@ -1,18 +1,14 @@
-/* ========================= FRONTEND (React / Vite) =========================
-   Changes from your current frontend:
-   - Remove direct calls to graph.instagram.com / graph.facebook.com to fetch posts/comments
-   - After login + token exchange, call YOUR backend:
-       GET http://localhost:3000/posts?access_token=...&user_id=...
-   - UI shows returned posts + comments
-*/
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 const APP_ID = '1251511386469731'
 const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
-const TOKEN_ENDPOINT = import.meta.env.VITE_IG_TOKEN_ENDPOINT || "https://94048c036755.ngrok-free.app/api/instagram-token";
-const POSTS_ENDPOINT = import.meta.env.VITE_POSTS_ENDPOINT || "https://94048c036755.ngrok-free.app/posts";
+
+const TOKEN_ENDPOINT =
+  import.meta.env.VITE_IG_TOKEN_ENDPOINT || "https://83e6e7546bf1.ngrok-free.app/api/instagram-token";
+
+const POSTS_ENDPOINT =
+  import.meta.env.VITE_POSTS_ENDPOINT || "https://83e6e7546bf1.ngrok-free.app/posts";
 
 const scopes = [
   "instagram_business_basic",
@@ -63,14 +59,18 @@ export default function App() {
       setError("");
       setStatus("Loading posts from backend...");
 
-      const params = new URLSearchParams({
-        access_token: token,
-        user_id: String(igUserId),
+      const resp = await fetch(POSTS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          access_token: token,
+          user_id: String(igUserId),
+        }),
       });
 
-      const resp = await fetch(`${POSTS_ENDPOINT}?${params.toString()}`);
+      const contentType = resp.headers.get("content-type") || "";
       if (!resp.ok) {
-        const msg = await resp.text();
+        const msg = contentType.includes("application/json") ? JSON.stringify(await resp.json()) : await resp.text();
         throw new Error(msg || "Failed to load posts");
       }
 
@@ -98,9 +98,12 @@ export default function App() {
           }),
         });
 
+        const contentType = response.headers.get("content-type") || "";
         if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Token exchange failed");
+          const msg = contentType.includes("application/json")
+            ? JSON.stringify(await response.json())
+            : await response.text();
+          throw new Error(msg || "Token exchange failed");
         }
 
         const data = await response.json();
@@ -117,7 +120,7 @@ export default function App() {
         setStatus("Access token received. Loading posts...");
         await fetchPostsFromBackend(data.access_token, data.user_id);
       } catch (err) {
-        setError(err?.message || "Something went wrong while exchanging the code.");
+        setError(err?.message || "Token exchange failed.");
         setStatus("");
       }
     },
@@ -131,7 +134,7 @@ export default function App() {
       return;
     }
     exchangeCodeForToken(authCode);
-  }, [authCode, exchangeCodeForToken, accessToken]);
+  }, [authCode, accessToken, exchangeCodeForToken]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem("ig_access_token");
@@ -150,7 +153,7 @@ export default function App() {
     setAccessToken("");
     setUserId("");
     setPosts([]);
-    setStatus("Logged out. Connect again to reload data.");
+    setStatus("Logged out.");
   };
 
   return (
@@ -158,9 +161,7 @@ export default function App() {
       <header className="header">
         <div>
           <h1>Instagram Business Login</h1>
-          <p className="subtitle">
-            Connect your Instagram professional account, then the backend will pull posts and comments.
-          </p>
+          <p className="subtitle">Connect Instagram, then backend returns posts and comments.</p>
         </div>
         <div className="header-actions">
           <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
@@ -177,8 +178,6 @@ export default function App() {
       <section className="status-bar">
         {status && <div className="status-chip">{status}</div>}
         {error && <div className="error-chip">Error: {error}</div>}
-        {!status && !error && !accessToken && <div className="status-chip muted">Waiting for login...</div>}
-        {!status && accessToken && !error && <div className="status-chip">Connected</div>}
       </section>
 
       <section className="token-box">
@@ -189,9 +188,8 @@ export default function App() {
             <code className="code-block">{authCode || "Not received yet"}</code>
           </div>
           <div>
-            <p className="label">Access token (short-lived)</p>
+            <p className="label">Access token</p>
             <code className="code-block">{accessToken || "No token yet"}</code>
-            <p className="note">Token is kept client-side for the session; backend uses it only to fetch posts.</p>
           </div>
           <div>
             <p className="label">Instagram user id</p>
@@ -207,35 +205,28 @@ export default function App() {
       </section>
 
       <section className="posts">
-        <div className="posts-header">
-          <h2>Recent posts</h2>
-        </div>
+        <h2>Recent posts</h2>
 
-        {!posts.length && <p className="muted">No posts loaded yet. Connect your account to see data.</p>}
+        {!posts.length && <p className="muted">No posts loaded yet.</p>}
 
         <div className="media-grid">
-          {posts.map((item) => (
-            <article key={item.id} className="card">
+          {posts.map((p) => (
+            <article key={p.id} className="card">
               <div className="card-top">
-                <p className="label">{item.media_type}</p>
-                <a href={item.permalink} target="_blank" rel="noreferrer">
-                  View on Instagram
-                </a>
+                <p className="label">{p.media_type}</p>
+                <a href={p.permalink} target="_blank" rel="noreferrer">View on Instagram</a>
               </div>
 
-              <p className="caption">{item.caption || "No caption"}</p>
-              <p className="timestamp">{item.timestamp}</p>
+              <p className="caption">{p.caption || "No caption"}</p>
+              <p className="timestamp">{p.timestamp}</p>
 
               <div className="comments">
-                <div className="comments-header">
-                  <p className="label">Comments</p>
-                </div>
-
-                {item.comments?.length ? (
+                <p className="label">Comments</p>
+                {p.comments?.length ? (
                   <ul>
-                    {item.comments.map((comment) => (
-                      <li key={comment.id}>
-                        <span className="comment-user">{comment.username || "unknown"}</span>: {comment.text}
+                    {p.comments.map((c) => (
+                      <li key={c.id}>
+                        <span className="comment-user">{c.username || "unknown"}</span>: {c.text}
                       </li>
                     ))}
                   </ul>
@@ -246,13 +237,6 @@ export default function App() {
             </article>
           ))}
         </div>
-
-        {!!posts.length && (
-          <details className="json-dump">
-            <summary>Raw JSON</summary>
-            <pre>{JSON.stringify(posts, null, 2)}</pre>
-          </details>
-        )}
       </section>
     </main>
   );
