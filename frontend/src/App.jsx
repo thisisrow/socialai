@@ -4,7 +4,7 @@ import "./App.css";
 const APP_ID = '1251511386469731'
 const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://cef6cd14e1f1.ngrok-free.app";
+const API_BASE ="https://7d701c3c835f.ngrok-free.app";
 
 const TOKEN_ENDPOINT = `${API_BASE}/api/instagram-token`;
 const POSTS_ENDPOINT = `${API_BASE}/posts`;
