@@ -14,10 +14,10 @@ const APP_ID = import.meta.env.VITE_IG_APP_ID;
 const REDIRECT_URI = import.meta.env.VITE_IG_REDIRECT_URI;
 
 const TOKEN_ENDPOINT =
-  import.meta.env.VITE_IG_TOKEN_ENDPOINT || "http://localhost:3000/api/instagram-token";
+  import.meta.env.VITE_IG_TOKEN_ENDPOINT || "https://cef6cd14e1f1.ngrok-free.app/api/instagram-token";
 
 const POSTS_ENDPOINT =
-  import.meta.env.VITE_POSTS_ENDPOINT || "http://localhost:3000/posts";
+  import.meta.env.VITE_POSTS_ENDPOINT || "https://cef6cd14e1f1.ngrok-free.app/posts";
 
 const scopes = [
   "instagram_business_basic",
