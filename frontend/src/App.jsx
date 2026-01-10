@@ -1,241 +1,157 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import './App.css'
+/* ========================= FRONTEND (React / Vite) =========================
+   Changes from your current frontend:
+   - Remove direct calls to graph.instagram.com / graph.facebook.com to fetch posts/comments
+   - After login + token exchange, call YOUR backend:
+       GET http://localhost:3000/posts?access_token=...&user_id=...
+   - UI shows returned posts + comments
+*/
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import "./App.css";
 
 const APP_ID = '1251511386469731'
 const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
-const APP_SECRET = import.meta.env.VITE_IG_APP_SECRET
-const TOKEN_ENDPOINT = import.meta.env.VITE_IG_TOKEN_ENDPOINT || '/api/instagram-token' // server-side endpoint to avoid CORS
+const TOKEN_ENDPOINT = import.meta.env.VITE_IG_TOKEN_ENDPOINT || "https://94048c036755.ngrok-free.app/api/instagram-token";
+const POSTS_ENDPOINT = import.meta.env.VITE_POSTS_ENDPOINT || "https://94048c036755.ngrok-free.app/posts";
 
 const scopes = [
-  'instagram_business_basic',
-  'instagram_business_manage_messages',
-  'instagram_business_manage_comments',
-  'instagram_business_content_publish',
-  'instagram_business_manage_insights',
-]
+  "instagram_business_basic",
+  "instagram_business_manage_messages",
+  "instagram_business_manage_comments",
+  "instagram_business_content_publish",
+  "instagram_business_manage_insights",
+];
 
-function App() {
-  const [authCode, setAuthCode] = useState('')
-  const [accessToken, setAccessToken] = useState('')
-  const [userId, setUserId] = useState('')
-  const [media, setMedia] = useState([])
-  const [status, setStatus] = useState('')
-  const [error, setError] = useState('')
-  const [commentsById, setCommentsById] = useState({})
-  const isBasicDisplayToken = useMemo(() => accessToken?.startsWith('IG'), [accessToken])
+export default function App() {
+  const [authCode, setAuthCode] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [userId, setUserId] = useState("");
+  const [posts, setPosts] = useState([]);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
 
   const loginUrl = useMemo(() => {
     const params = new URLSearchParams({
-      force_reauth: 'true',
+      force_reauth: "true",
       client_id: APP_ID,
       redirect_uri: REDIRECT_URI,
-      response_type: 'code',
-      scope: scopes.join(','),
-    })
-    return `https://www.instagram.com/oauth/authorize?${params.toString()}`
-  }, [])
+      response_type: "code",
+      scope: scopes.join(","),
+    });
+    return `https://www.instagram.com/oauth/authorize?${params.toString()}`;
+  }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const incomingCode = params.get('code')
+    const params = new URLSearchParams(window.location.search);
+    const incomingCode = params.get("code");
     if (incomingCode) {
-      // Instagram appends #_ at the end, strip it if present.
-      const cleaned = incomingCode.replace(/#_$/, '')
-      setAuthCode(cleaned)
-      setStatus('Authorization code received. Exchanging for access token...')
+      setAuthCode(incomingCode.replace(/#_$/, ""));
+      setStatus("Authorization code received. Exchanging for access token...");
     }
-  }, [])
+  }, []);
 
   const clearCodeFromUrl = () => {
-    const url = new URL(window.location.href)
-    if (url.searchParams.has('code')) {
-      url.searchParams.delete('code')
-      window.history.replaceState({}, document.title, url.toString())
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("code")) {
+      url.searchParams.delete("code");
+      window.history.replaceState({}, document.title, url.toString());
     }
-  }
+  };
 
-  const fetchCommentsForMedia = useCallback(async (mediaId, token, usingBasicToken = false) => {
-    if (!token) return
-    setCommentsById((prev) => ({
-      ...prev,
-      [mediaId]: { ...prev[mediaId], loading: true, error: '', comments: prev[mediaId]?.comments || [] },
-    }))
-
+  const fetchPostsFromBackend = useCallback(async (token, igUserId) => {
     try {
-      const params = new URLSearchParams({
-        fields: 'id,text,username,timestamp,like_count',
-        access_token: token,
-        limit: '50',
-      })
+      setError("");
+      setStatus("Loading posts from backend...");
 
-      // Use graph.instagram.com for Basic Display / IG tokens, otherwise use the Facebook Graph endpoint
-      const baseUrl = 'https://graph.instagram.com'
-      const url = `${baseUrl}/${mediaId}/comments?${params.toString()}`
-      const resp = await fetch(url)
+      const params = new URLSearchParams({
+        access_token: token,
+        user_id: String(igUserId),
+      });
+
+      const resp = await fetch(`${POSTS_ENDPOINT}?${params.toString()}`);
       if (!resp.ok) {
-        const message = await resp.text()
-        throw new Error(message || 'Failed to load comments')
+        const msg = await resp.text();
+        throw new Error(msg || "Failed to load posts");
       }
-      const json = await resp.json()
-      setCommentsById((prev) => ({
-        ...prev,
-        [mediaId]: { loading: false, error: '', comments: json?.data || [] },
-      }))
-    } catch (err) {
-      setCommentsById((prev) => ({
-        ...prev,
-        [mediaId]: { loading: false, error: err?.message || 'Failed to load comments', comments: [] },
-      }))
-    }
-  }, [])
 
-  const loadCommentsForMediaList = useCallback(
-    (items, token, usingBasicToken) => {
-      if (!Array.isArray(items)) return
-      items.forEach((item) => {
-        if (item?.id) {
-          fetchCommentsForMedia(item.id, token, usingBasicToken)
+      const json = await resp.json();
+      setPosts(json?.posts || []);
+      setStatus("Connected");
+    } catch (err) {
+      setError(err?.message || "Unable to load posts.");
+      setStatus("");
+    }
+  }, []);
+
+  const exchangeCodeForToken = useCallback(
+    async (code) => {
+      try {
+        setError("");
+
+        const response = await fetch(TOKEN_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_id: APP_ID,
+            redirect_uri: REDIRECT_URI,
+            code,
+          }),
+        });
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "Token exchange failed");
         }
-      })
-    },
-    [fetchCommentsForMedia],
-  )
 
-  const fetchMedia = useCallback(async (igUserId, token) => {
-    try {
-      const usingBasicToken = token.startsWith('IG') || isBasicDisplayToken
-      setStatus(
-        usingBasicToken
-          ? 'Fetching media via graph.instagram.com (comments are not available with this token)...'
-          : 'Fetching media and comments...',
-      )
-      setError('')
+        const data = await response.json();
+        if (!data.access_token || !data.user_id) {
+          throw new Error("Token endpoint did not return access_token and user_id.");
+        }
 
-      const fields = [
-        'id',
-        'caption',
-        'media_type',
-        'media_url',
-        'permalink',
-        'thumbnail_url',
-        'timestamp',
-        'comments.limit(5){id,text,username,timestamp}',
-      ]
+        setAccessToken(data.access_token);
+        setUserId(String(data.user_id));
+        localStorage.setItem("ig_access_token", data.access_token);
+        localStorage.setItem("ig_user_id", String(data.user_id));
 
-      const basicDisplayFields = ['id', 'caption', 'media_type', 'media_url', 'permalink', 'thumbnail_url', 'timestamp', 'username']
-
-      const params = new URLSearchParams({
-        fields: (usingBasicToken ? basicDisplayFields : fields).join(','),
-        access_token: token,
-      })
-
-      const baseUrl = 'https://graph.instagram.com'
-      const path = usingBasicToken ? 'me/media' : `${igUserId}/media`
-      const url = `${baseUrl}/${path}?${params.toString()}`
-      const response = await fetch(url)
-
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || 'Failed to load media')
+        clearCodeFromUrl();
+        setStatus("Access token received. Loading posts...");
+        await fetchPostsFromBackend(data.access_token, data.user_id);
+      } catch (err) {
+        setError(err?.message || "Something went wrong while exchanging the code.");
+        setStatus("");
       }
+    },
+    [fetchPostsFromBackend]
+  );
 
-      const data = await response.json()
-      setMedia(data?.data || [])
-      setStatus(usingBasicToken ? 'Connected (basic token: comments unavailable)' : 'Connected')
-      loadCommentsForMediaList(data?.data, token, usingBasicToken)
-    } catch (err) {
-      setError(err?.message || 'Unable to load posts.')
-      setStatus('')
+  useEffect(() => {
+    if (!authCode) return;
+    if (accessToken) {
+      clearCodeFromUrl();
+      return;
     }
-  }, [isBasicDisplayToken, loadCommentsForMediaList])
+    exchangeCodeForToken(authCode);
+  }, [authCode, exchangeCodeForToken, accessToken]);
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem("ig_access_token");
+    const storedUserId = localStorage.getItem("ig_user_id");
+    if (storedToken && storedUserId && !accessToken) {
+      setAccessToken(storedToken);
+      setUserId(storedUserId);
+      setStatus("Restored session. Loading posts...");
+      fetchPostsFromBackend(storedToken, storedUserId);
+    }
+  }, [accessToken, fetchPostsFromBackend]);
 
   const handleLogout = () => {
-    localStorage.removeItem('ig_access_token')
-    localStorage.removeItem('ig_user_id')
-    setAccessToken('')
-    setUserId('')
-    setMedia([])
-    setStatus('Logged out. Connect again to reload data.')
-  }
-
-  const exchangeCodeForToken = useCallback(async (code) => {
-    try {
-      setError('')
-
-      const body = new URLSearchParams({
-        client_id: APP_ID,
-        redirect_uri: REDIRECT_URI,
-        code,
-      })
-
-      let url = 'https://api.instagram.com/oauth/access_token'
-
-      if (TOKEN_ENDPOINT) {
-        // Prefer your own serverless endpoint to avoid CORS with api.instagram.com
-        url = TOKEN_ENDPOINT
-      } else if (APP_SECRET) {
-        body.append('client_secret', APP_SECRET)
-        body.append('grant_type', 'authorization_code')
-      } else {
-        setError(
-          'Set VITE_IG_TOKEN_ENDPOINT to a server-side token exchange endpoint (recommended) or VITE_IG_APP_SECRET for local dev.',
-        )
-        setStatus('')
-        return
-      }
-
-      if (!body.get('grant_type')) {
-        body.append('grant_type', 'authorization_code')
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        body,
-      })
-
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || 'Token exchange failed')
-      }
-
-      const data = await response.json()
-      if (!data.access_token || !data.user_id) {
-        throw new Error('Token endpoint did not return access_token and user_id.')
-      }
-
-      setAccessToken(data.access_token)
-      setUserId(String(data.user_id))
-      localStorage.setItem('ig_access_token', data.access_token)
-      localStorage.setItem('ig_user_id', String(data.user_id))
-      clearCodeFromUrl()
-      setStatus('Access token received. Loading recent posts...')
-      fetchMedia(data.user_id, data.access_token)
-    } catch (err) {
-      setError(err?.message || 'Something went wrong while exchanging the code.')
-      setStatus('')
-    }
-  }, [fetchMedia])
-
-  useEffect(() => {
-    if (!authCode) return
-    if (accessToken) {
-      clearCodeFromUrl()
-      return
-    }
-    exchangeCodeForToken(authCode)
-  }, [authCode, exchangeCodeForToken, accessToken])
-
-  useEffect(() => {
-    // Restore from localStorage to avoid re-authenticating on refresh while the token is valid.
-    const storedToken = localStorage.getItem('ig_access_token')
-    const storedUserId = localStorage.getItem('ig_user_id')
-    if (storedToken && storedUserId && !accessToken) {
-      setAccessToken(storedToken)
-      setUserId(storedUserId)
-      setStatus('Restored session. Loading posts...')
-      fetchMedia(storedUserId, storedToken)
-    }
-  }, [accessToken, fetchMedia])
+    localStorage.removeItem("ig_access_token");
+    localStorage.removeItem("ig_user_id");
+    setAccessToken("");
+    setUserId("");
+    setPosts([]);
+    setStatus("Logged out. Connect again to reload data.");
+  };
 
   return (
     <main className="page">
@@ -243,11 +159,11 @@ function App() {
         <div>
           <h1>Instagram Business Login</h1>
           <p className="subtitle">
-            Connect your Instagram professional account, then we’ll pull a few posts and their recent comments as JSON for inspection.
+            Connect your Instagram professional account, then the backend will pull posts and comments.
           </p>
         </div>
         <div className="header-actions">
-          <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, '_self')}>
+          <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
             Connect account
           </button>
           {accessToken && (
@@ -270,34 +186,35 @@ function App() {
         <div className="token-grid">
           <div>
             <p className="label">Authorization code</p>
-            <code className="code-block">{authCode || 'Not received yet'}</code>
+            <code className="code-block">{authCode || "Not received yet"}</code>
           </div>
           <div>
             <p className="label">Access token (short-lived)</p>
-            <code className="code-block">{accessToken || 'No token yet'}</code>
-            <p className="note">Never expose your app secret in production. Move token exchange to a server.</p>
+            <code className="code-block">{accessToken || "No token yet"}</code>
+            <p className="note">Token is kept client-side for the session; backend uses it only to fetch posts.</p>
           </div>
           <div>
             <p className="label">Instagram user id</p>
-            <code className="code-block">{userId || 'Unknown'}</code>
+            <code className="code-block">{userId || "Unknown"}</code>
           </div>
         </div>
+
+        {accessToken && userId && (
+          <button className="ghost-btn" type="button" onClick={() => fetchPostsFromBackend(accessToken, userId)}>
+            Refresh posts
+          </button>
+        )}
       </section>
 
       <section className="posts">
         <div className="posts-header">
           <h2>Recent posts</h2>
-          {accessToken && userId && (
-            <button className="ghost-btn" type="button" onClick={() => fetchMedia(userId, accessToken)}>
-              Refresh
-            </button>
-          )}
         </div>
 
-        {!media.length && <p className="muted">No posts loaded yet. Connect your account to see data.</p>}
+        {!posts.length && <p className="muted">No posts loaded yet. Connect your account to see data.</p>}
 
         <div className="media-grid">
-          {media.map((item) => (
+          {posts.map((item) => (
             <article key={item.id} className="card">
               <div className="card-top">
                 <p className="label">{item.media_type}</p>
@@ -305,51 +222,38 @@ function App() {
                   View on Instagram
                 </a>
               </div>
-              <p className="caption">{item.caption || 'No caption'}</p>
-              {item.media_url && <img className="media-img" src={item.media_url} alt={item.caption || 'Instagram media'} />}
+
+              <p className="caption">{item.caption || "No caption"}</p>
               <p className="timestamp">{item.timestamp}</p>
-              {isBasicDisplayToken ? (
-                <p className="muted small">Comments are not returned with this (Basic Display) token.</p>
-              ) : (
-                <div className="comments">
-                  <div className="comments-header">
-                    <p className="label">Comments</p>
-                    <button
-                      className="ghost-btn small-btn"
-                      type="button"
-                      onClick={() => fetchCommentsForMedia(item.id, accessToken, isBasicDisplayToken)}
-                    >
-                      Reload
-                    </button>
-                  </div>
-                  {commentsById[item.id]?.loading && <p className="muted small">Loading comments...</p>}
-                  {commentsById[item.id]?.error && <p className="error-text small">Error: {commentsById[item.id].error}</p>}
-                  {commentsById[item.id]?.comments?.length ? (
-                    <ul>
-                      {commentsById[item.id].comments.map((comment) => (
-                        <li key={comment.id}>
-                          <span className="comment-user">{comment.username}</span>: {comment.text}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    !commentsById[item.id]?.loading && <p className="muted small">No comments fetched.</p>
-                  )}
+
+              <div className="comments">
+                <div className="comments-header">
+                  <p className="label">Comments</p>
                 </div>
-              )}
+
+                {item.comments?.length ? (
+                  <ul>
+                    {item.comments.map((comment) => (
+                      <li key={comment.id}>
+                        <span className="comment-user">{comment.username || "unknown"}</span>: {comment.text}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted small">No comments found.</p>
+                )}
+              </div>
             </article>
           ))}
         </div>
 
-        {!!media.length && (
+        {!!posts.length && (
           <details className="json-dump">
             <summary>Raw JSON</summary>
-            <pre>{JSON.stringify(media, null, 2)}</pre>
+            <pre>{JSON.stringify(posts, null, 2)}</pre>
           </details>
         )}
       </section>
     </main>
-  )
+  );
 }
-
-export default App
