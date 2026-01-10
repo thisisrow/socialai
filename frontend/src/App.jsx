@@ -1,23 +1,16 @@
-// ===================== FRONTEND: add toggle + per-post context modal =====================
-// Drop-in replacement for your App.jsx (keeps your login + backend fetch logic).
-// Features:
-// - Global Auto-Reply toggle (ON/OFF)
-// - Each post: "Add context" button opens modal
-// - Modal: input/textarea + Save, Edit, Delete
-// - Context stored per-post in localStorage
-// - When fetching /posts, sends autoReply=1 and context (merged) to backend
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const APP_ID = import.meta.env.VITE_IG_APP_ID;
-const REDIRECT_URI = import.meta.env.VITE_IG_REDIRECT_URI;
+const APP_ID = '1251511386469731'
+const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
 
-const TOKEN_ENDPOINT =
-  import.meta.env.VITE_IG_TOKEN_ENDPOINT || "https://cef6cd14e1f1.ngrok-free.app/api/instagram-token";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://cef6cd14e1f1.ngrok-free.app";
 
-const POSTS_ENDPOINT =
-  import.meta.env.VITE_POSTS_ENDPOINT || "https://cef6cd14e1f1.ngrok-free.app/posts";
+const TOKEN_ENDPOINT = `${API_BASE}/api/instagram-token`;
+const POSTS_ENDPOINT = `${API_BASE}/posts`;
+
+const CONTEXT_ENDPOINT = `${API_BASE}/api/context`;
+const POSTSTATE_ENDPOINT = `${API_BASE}/api/post-state`;
 
 const scopes = [
   "instagram_business_basic",
@@ -27,30 +20,10 @@ const scopes = [
   "instagram_business_manage_insights",
 ];
 
-const LS_CONTEXT_KEY = "post_context_map_v1";
-const LS_AUTOREPLY_KEY = "auto_reply_enabled_v1";
-
-function loadContextMap() {
-  try {
-    const raw = localStorage.getItem(LS_CONTEXT_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-function saveContextMap(map) {
-  localStorage.setItem(LS_CONTEXT_KEY, JSON.stringify(map));
-}
-
 function Modal({ open, title, children, onClose }) {
   if (!open) return null;
   return (
-    <div
-      className="modal-backdrop"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
@@ -68,24 +41,18 @@ export default function App() {
   const [authCode, setAuthCode] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [userId, setUserId] = useState("");
+
   const [posts, setPosts] = useState([]);
+  const [contextMap, setContextMap] = useState({});   // { [postId]: text }
+  const [stateMap, setStateMap] = useState({});       // { [postId]: { autoReplyEnabled, sinceMs } }
+
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
-  // auto reply toggle
-  const [autoReplyEnabled, setAutoReplyEnabled] = useState(() => {
-    const v = localStorage.getItem(LS_AUTOREPLY_KEY);
-    return v ? v === "1" : false;
-  });
-
-  // per-post context map: { [postId]: "context text" }
-  const [contextMap, setContextMap] = useState(() => loadContextMap());
-
-  // modal state
+  // modal
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [activePostId, setActivePostId] = useState(null);
   const [contextDraft, setContextDraft] = useState("");
-  const [isEditing, setIsEditing] = useState(false);
 
   const loginUrl = useMemo(() => {
     const params = new URLSearchParams({
@@ -115,127 +82,89 @@ export default function App() {
     }
   };
 
-  const openContextModal = (postId) => {
-    const existing = contextMap?.[postId] || "";
-    setActivePostId(postId);
-    setContextDraft(existing);
-    setIsEditing(Boolean(existing));
-    setContextModalOpen(true);
-  };
+  const loadServerConfigs = useCallback(async (uid) => {
+    try {
+      const [ctxRes, stRes] = await Promise.all([
+        fetch(`${CONTEXT_ENDPOINT}?userId=${encodeURIComponent(uid)}`),
+        fetch(`${POSTSTATE_ENDPOINT}?userId=${encodeURIComponent(uid)}`),
+      ]);
 
-  const closeContextModal = () => {
-    setContextModalOpen(false);
-    setActivePostId(null);
-    setContextDraft("");
-    setIsEditing(false);
-  };
+      const ctxJson = ctxRes.ok ? await ctxRes.json() : { contextMap: {} };
+      const stJson = stRes.ok ? await stRes.json() : { stateMap: {} };
 
-  const saveContext = () => {
-    if (!activePostId) return;
-    const next = { ...contextMap, [activePostId]: contextDraft.trim() };
-    setContextMap(next);
-    saveContextMap(next);
-    setIsEditing(true);
-  };
+      setContextMap(ctxJson.contextMap || {});
+      setStateMap(stJson.stateMap || {});
+    } catch {
+      // non-fatal
+    }
+  }, []);
 
-  const deleteContext = () => {
-    if (!activePostId) return;
-    const next = { ...contextMap };
-    delete next[activePostId];
-    setContextMap(next);
-    saveContextMap(next);
-    setContextDraft("");
-    setIsEditing(false);
-  };
+  const fetchPostsFromBackend = useCallback(async (token, igUserId) => {
+    try {
+      setError("");
+      setStatus("Loading posts...");
+      const resp = await fetch(POSTS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_token: token, user_id: String(igUserId) }),
+      });
 
-  const toggleAutoReply = () => {
-    setAutoReplyEnabled((prev) => {
-      const next = !prev;
-      localStorage.setItem(LS_AUTOREPLY_KEY, next ? "1" : "0");
-      return next;
-    });
-  };
-
-  const fetchPostsFromBackend = useCallback(
-    async (token, igUserId, autoReplyFlag = autoReplyEnabled) => {
-      try {
-        setError("");
-        setStatus("Loading posts from backend...");
-
-        // send global toggle + all contexts to backend
-        const resp = await fetch(POSTS_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            access_token: token,
-            user_id: String(igUserId),
-            autoReply: autoReplyFlag ? 1 : 0,
-            contextMap, // backend can use per-post context if you add logic there
-          }),
-        });
-
-        const contentType = resp.headers.get("content-type") || "";
-        if (!resp.ok) {
-          const msg = contentType.includes("application/json")
-            ? JSON.stringify(await resp.json())
-            : await resp.text();
-          throw new Error(msg || "Failed to load posts");
-        }
-
-        const json = await resp.json();
-        setPosts(json?.posts || []);
-        setStatus("Connected");
-      } catch (err) {
-        setError(err?.message || "Unable to load posts.");
-        setStatus("");
+      const ct = resp.headers.get("content-type") || "";
+      if (!resp.ok) {
+        const msg = ct.includes("application/json") ? JSON.stringify(await resp.json()) : await resp.text();
+        throw new Error(msg || "Failed to load posts");
       }
-    },
-    [autoReplyEnabled, contextMap]
-  );
 
-  const exchangeCodeForToken = useCallback(
-    async (code) => {
-      try {
-        setError("");
+      const json = await resp.json();
+      setPosts(json?.posts || []);
 
-        const response = await fetch(TOKEN_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            client_id: APP_ID,
-            redirect_uri: REDIRECT_URI,
-            code,
-          }),
-        });
+      // keep UI in sync if backend returns maps
+      if (json?.contextMap) setContextMap(json.contextMap);
+      if (json?.stateMap) setStateMap(json.stateMap);
 
-        const contentType = response.headers.get("content-type") || "";
-        if (!response.ok) {
-          const msg = contentType.includes("application/json")
-            ? JSON.stringify(await response.json())
-            : await response.text();
-          throw new Error(msg || "Token exchange failed");
-        }
+      setStatus("Connected");
+    } catch (e) {
+      setError(e?.message || "Unable to load posts.");
+      setStatus("");
+    }
+  }, []);
 
-        const data = await response.json();
-        if (!data.access_token || !data.user_id) {
-          throw new Error("Token endpoint did not return access_token and user_id.");
-        }
+  const exchangeCodeForToken = useCallback(async (code) => {
+    try {
+      setError("");
+      const response = await fetch(TOKEN_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: APP_ID,
+          redirect_uri: REDIRECT_URI,
+          code,
+        }),
+      });
 
-        setAccessToken(data.access_token);
-        setUserId(String(data.user_id));
-        localStorage.setItem("ig_access_token", data.access_token);
-        localStorage.setItem("ig_user_id", String(data.user_id));
-
-        clearCodeFromUrl();
-        setStatus("Access token received. Loading posts...");
-        await fetchPostsFromBackend(data.access_token, data.user_id);
-      } catch (err) {
-        setError(err?.message || "Token exchange failed.");
-        setStatus("");
+      const ct = response.headers.get("content-type") || "";
+      if (!response.ok) {
+        const msg = ct.includes("application/json") ? JSON.stringify(await response.json()) : await response.text();
+        throw new Error(msg || "Token exchange failed");
       }
-    },
-    [fetchPostsFromBackend]
-  );
+
+      const data = await response.json();
+      if (!data.access_token || !data.user_id) throw new Error("Token endpoint missing access_token/user_id");
+
+      setAccessToken(data.access_token);
+      setUserId(String(data.user_id));
+      localStorage.setItem("ig_access_token", data.access_token);
+      localStorage.setItem("ig_user_id", String(data.user_id));
+
+      clearCodeFromUrl();
+
+      await loadServerConfigs(String(data.user_id));
+      await fetchPostsFromBackend(data.access_token, data.user_id);
+    } catch (e) {
+      setError(e?.message || "Token exchange failed.");
+      setStatus("");
+    }
+  }, [fetchPostsFromBackend, loadServerConfigs]);
 
   useEffect(() => {
     if (!authCode) return;
@@ -252,10 +181,13 @@ export default function App() {
     if (storedToken && storedUserId && !accessToken) {
       setAccessToken(storedToken);
       setUserId(storedUserId);
-      setStatus("Restored session. Loading posts...");
-      fetchPostsFromBackend(storedToken, storedUserId);
+      (async () => {
+        setStatus("Restoring session...");
+        await loadServerConfigs(storedUserId);
+        await fetchPostsFromBackend(storedToken, storedUserId);
+      })();
     }
-  }, [accessToken, fetchPostsFromBackend]);
+  }, [accessToken, fetchPostsFromBackend, loadServerConfigs]);
 
   const handleLogout = () => {
     localStorage.removeItem("ig_access_token");
@@ -263,7 +195,99 @@ export default function App() {
     setAccessToken("");
     setUserId("");
     setPosts([]);
+    setContextMap({});
+    setStateMap({});
     setStatus("Logged out.");
+  };
+
+  // ---------- Context modal ----------
+  const openContextModal = (postId) => {
+    setActivePostId(postId);
+    setContextDraft(contextMap?.[postId] || "");
+    setContextModalOpen(true);
+  };
+
+  const closeContextModal = () => {
+    setContextModalOpen(false);
+    setActivePostId(null);
+    setContextDraft("");
+  };
+
+  const saveContext = async () => {
+    if (!activePostId || !userId) return;
+    const text = contextDraft.trim();
+    if (!text) return;
+
+    try {
+      const r = await fetch(CONTEXT_ENDPOINT, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, postId: activePostId, text }),
+      });
+
+      if (!r.ok) throw new Error(await r.text());
+
+      setContextMap((prev) => ({ ...prev, [activePostId]: text }));
+      setStatus("Context saved");
+    } catch (e) {
+      setError(e?.message || "Failed to save context");
+    }
+  };
+
+  const deleteContext = async () => {
+    if (!activePostId || !userId) return;
+
+    try {
+      const r = await fetch(CONTEXT_ENDPOINT, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, postId: activePostId }),
+      });
+
+      if (!r.ok) throw new Error(await r.text());
+
+      setContextMap((prev) => {
+        const next = { ...prev };
+        delete next[activePostId];
+        return next;
+      });
+      setContextDraft("");
+      setStatus("Context deleted");
+    } catch (e) {
+      setError(e?.message || "Failed to delete context");
+    }
+  };
+
+  // ---------- Per-post toggle ----------
+  const togglePostAutoReply = async (postId) => {
+    if (!userId) return;
+
+    const current = Boolean(stateMap?.[postId]?.autoReplyEnabled);
+    const next = !current;
+
+    try {
+      const r = await fetch(POSTSTATE_ENDPOINT, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, postId, enabled: next }),
+      });
+
+      if (!r.ok) throw new Error(await r.text());
+      const json = await r.json();
+
+      setStateMap((prev) => ({
+        ...prev,
+        [postId]: {
+          autoReplyEnabled: Boolean(json?.state?.autoReplyEnabled),
+          sinceMs: json?.state?.sinceMs ?? null,
+        },
+      }));
+
+      // Optional: refresh posts so AI can reply immediately if new eligible comment exists
+      if (accessToken) await fetchPostsFromBackend(accessToken, userId);
+    } catch (e) {
+      setError(e?.message || "Failed to update post state");
+    }
   };
 
   return (
@@ -291,23 +315,7 @@ export default function App() {
       </section>
 
       <section className="token-box">
-        <div className="token-row">
-          <h2>Auth details</h2>
-
-          <div className="toggle-wrap">
-            <span className="label">Auto AI Reply</span>
-            <button
-              type="button"
-              className={autoReplyEnabled ? "toggle-btn on" : "toggle-btn off"}
-              onClick={toggleAutoReply}
-              disabled={!accessToken}
-              title={!accessToken ? "Connect account first" : ""}
-            >
-              {autoReplyEnabled ? "ON" : "OFF"}
-            </button>
-          </div>
-        </div>
-
+        <h2>Auth details</h2>
         <div className="token-grid">
           <div>
             <p className="label">Authorization code</p>
@@ -336,7 +344,9 @@ export default function App() {
 
         <div className="media-grid">
           {posts.map((p) => {
-            const postCtx = contextMap?.[p.id];
+            const ctx = contextMap?.[p.id] || "";
+            const enabled = Boolean(stateMap?.[p.id]?.autoReplyEnabled);
+
             return (
               <article key={p.id} className="card">
                 <div className="card-top">
@@ -350,14 +360,21 @@ export default function App() {
                 <p className="timestamp">{p.timestamp}</p>
 
                 <div className="card-actions">
-                  <button
-                    className="ghost-btn small-btn"
-                    type="button"
-                    onClick={() => openContextModal(p.id)}
-                  >
-                    {postCtx ? "Edit context" : "Add context"}
+                  <button className="ghost-btn small-btn" type="button" onClick={() => openContextModal(p.id)}>
+                    {ctx ? "Edit context" : "Add context"}
                   </button>
-                  {postCtx && <span className="chip">Context saved</span>}
+
+                  {ctx && <span className="chip">Context saved</span>}
+
+                  <button
+                    type="button"
+                    className={enabled ? "toggle-btn on" : "toggle-btn off"}
+                    onClick={() => togglePostAutoReply(p.id)}
+                    disabled={!accessToken}
+                    title={!accessToken ? "Connect account first" : ""}
+                  >
+                    {enabled ? "AI Reply ON" : "AI Reply OFF"}
+                  </button>
                 </div>
 
                 <div className="comments">
@@ -380,29 +397,20 @@ export default function App() {
         </div>
       </section>
 
-      <Modal
-        open={contextModalOpen}
-        title={isEditing ? "Edit context" : "Add context"}
-        onClose={closeContextModal}
-      >
-        <p className="muted small">
-          This context will be saved for this post (localStorage) and can be sent to backend.
-        </p>
+      <Modal open={contextModalOpen} title="Post context" onClose={closeContextModal}>
+        <p className="muted small">This context is stored in MongoDB and used by AI replies for this post.</p>
 
         <textarea
           className="context-textarea"
           rows={7}
           value={contextDraft}
           onChange={(e) => setContextDraft(e.target.value)}
-          placeholder="Write context for this post (menu, price, timing, policies...)"
+          placeholder="Write context for this post..."
         />
 
         <div className="modal-actions">
           <button className="primary-btn" type="button" onClick={saveContext}>
             Save
-          </button>
-          <button className="ghost-btn" type="button" onClick={() => setIsEditing(true)}>
-            Edit
           </button>
           <button className="danger-btn" type="button" onClick={deleteContext}>
             Delete
