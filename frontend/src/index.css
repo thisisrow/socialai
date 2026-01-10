@@ -54,6 +54,15 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+/* Added Comment Scroll Logic */
+.comments {
+  max-height: 150px;
+  overflow-y: auto;
+  border-top: 1px solid #444;
+  margin-top: 10px;
+  padding-right: 5px; /* Space for scrollbar */
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
@@ -64,5 +73,8 @@ button:focus-visible {
   }
   button {
     background-color: #f9f9f9;
+  }
+  .comments {
+    border-top: 1px solid #eee;
   }
 }
