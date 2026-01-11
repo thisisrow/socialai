@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const APP_ID = '1251511386469731'
-const REDIRECT_URI = 'https://socialai-theta.vercel.app/'
+const APP_ID = "1251511386469731";
+const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
-const API_BASE ="https://7d701c3c835f.ngrok-free.app";
+const API_BASE = "https://7d701c3c835f.ngrok-free.app";
 
 const TOKEN_ENDPOINT = `${API_BASE}/api/instagram-token`;
 const POSTS_ENDPOINT = `${API_BASE}/posts`;
 
 const CONTEXT_ENDPOINT = `${API_BASE}/api/context`;
 const POSTSTATE_ENDPOINT = `${API_BASE}/api/post-state`;
+const SAVE_TOKEN_ENDPOINT = `${API_BASE}/api/user/token`;
 
 const scopes = [
   "instagram_business_basic",
@@ -43,13 +44,12 @@ export default function App() {
   const [userId, setUserId] = useState("");
 
   const [posts, setPosts] = useState([]);
-  const [contextMap, setContextMap] = useState({});   // { [postId]: text }
-  const [stateMap, setStateMap] = useState({});       // { [postId]: { autoReplyEnabled, sinceMs } }
+  const [contextMap, setContextMap] = useState({});
+  const [stateMap, setStateMap] = useState({});
 
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
-  // modal
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [activePostId, setActivePostId] = useState(null);
   const [contextDraft, setContextDraft] = useState("");
@@ -82,6 +82,15 @@ export default function App() {
     }
   };
 
+  const saveTokenToBackend = useCallback(async (uid, token) => {
+    const r = await fetch(SAVE_TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: String(uid), accessToken: String(token) }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+  }, []);
+
   const loadServerConfigs = useCallback(async (uid) => {
     try {
       const [ctxRes, stRes] = await Promise.all([
@@ -103,6 +112,7 @@ export default function App() {
     try {
       setError("");
       setStatus("Loading posts...");
+
       const resp = await fetch(POSTS_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -111,14 +121,15 @@ export default function App() {
 
       const ct = resp.headers.get("content-type") || "";
       if (!resp.ok) {
-        const msg = ct.includes("application/json") ? JSON.stringify(await resp.json()) : await resp.text();
+        const msg = ct.includes("application/json")
+          ? JSON.stringify(await resp.json())
+          : await resp.text();
         throw new Error(msg || "Failed to load posts");
       }
 
       const json = await resp.json();
       setPosts(json?.posts || []);
 
-      // keep UI in sync if backend returns maps
       if (json?.contextMap) setContextMap(json.contextMap);
       if (json?.stateMap) setStateMap(json.stateMap);
 
@@ -129,42 +140,53 @@ export default function App() {
     }
   }, []);
 
-  const exchangeCodeForToken = useCallback(async (code) => {
-    try {
-      setError("");
-      const response = await fetch(TOKEN_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: APP_ID,
-          redirect_uri: REDIRECT_URI,
-          code,
-        }),
-      });
+  const exchangeCodeForToken = useCallback(
+    async (code) => {
+      try {
+        setError("");
+        const response = await fetch(TOKEN_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_id: APP_ID,
+            redirect_uri: REDIRECT_URI,
+            code,
+          }),
+        });
 
-      const ct = response.headers.get("content-type") || "";
-      if (!response.ok) {
-        const msg = ct.includes("application/json") ? JSON.stringify(await response.json()) : await response.text();
-        throw new Error(msg || "Token exchange failed");
+        const ct = response.headers.get("content-type") || "";
+        if (!response.ok) {
+          const msg = ct.includes("application/json")
+            ? JSON.stringify(await response.json())
+            : await response.text();
+          throw new Error(msg || "Token exchange failed");
+        }
+
+        const data = await response.json();
+        if (!data.access_token || !data.user_id) {
+          throw new Error("Token endpoint missing access_token/user_id");
+        }
+
+        setAccessToken(data.access_token);
+        setUserId(String(data.user_id));
+
+        // REQUIRED: store token in backend so webhook can auto-reply
+        await saveTokenToBackend(String(data.user_id), data.access_token);
+
+        localStorage.setItem("ig_access_token", data.access_token);
+        localStorage.setItem("ig_user_id", String(data.user_id));
+
+        clearCodeFromUrl();
+
+        await loadServerConfigs(String(data.user_id));
+        await fetchPostsFromBackend(data.access_token, data.user_id);
+      } catch (e) {
+        setError(e?.message || "Token exchange failed.");
+        setStatus("");
       }
-
-      const data = await response.json();
-      if (!data.access_token || !data.user_id) throw new Error("Token endpoint missing access_token/user_id");
-
-      setAccessToken(data.access_token);
-      setUserId(String(data.user_id));
-      localStorage.setItem("ig_access_token", data.access_token);
-      localStorage.setItem("ig_user_id", String(data.user_id));
-
-      clearCodeFromUrl();
-
-      await loadServerConfigs(String(data.user_id));
-      await fetchPostsFromBackend(data.access_token, data.user_id);
-    } catch (e) {
-      setError(e?.message || "Token exchange failed.");
-      setStatus("");
-    }
-  }, [fetchPostsFromBackend, loadServerConfigs]);
+    },
+    [fetchPostsFromBackend, loadServerConfigs, saveTokenToBackend]
+  );
 
   useEffect(() => {
     if (!authCode) return;
@@ -178,29 +200,41 @@ export default function App() {
   useEffect(() => {
     const storedToken = localStorage.getItem("ig_access_token");
     const storedUserId = localStorage.getItem("ig_user_id");
+
     if (storedToken && storedUserId && !accessToken) {
       setAccessToken(storedToken);
       setUserId(storedUserId);
+
       (async () => {
-        setStatus("Restoring session...");
-        await loadServerConfigs(storedUserId);
-        await fetchPostsFromBackend(storedToken, storedUserId);
+        try {
+          setStatus("Restoring session...");
+
+          // REQUIRED: re-save token to backend after reload (keeps webhook working)
+          await saveTokenToBackend(storedUserId, storedToken);
+
+          await loadServerConfigs(storedUserId);
+          await fetchPostsFromBackend(storedToken, storedUserId);
+        } catch (e) {
+          setError(e?.message || "Failed to restore session");
+          setStatus("");
+        }
       })();
     }
-  }, [accessToken, fetchPostsFromBackend, loadServerConfigs]);
+  }, [accessToken, fetchPostsFromBackend, loadServerConfigs, saveTokenToBackend]);
 
   const handleLogout = () => {
     localStorage.removeItem("ig_access_token");
     localStorage.removeItem("ig_user_id");
+    setAuthCode("");
     setAccessToken("");
     setUserId("");
     setPosts([]);
     setContextMap({});
     setStateMap({});
     setStatus("Logged out.");
+    setError("");
   };
 
-  // ---------- Context modal ----------
   const openContextModal = (postId) => {
     setActivePostId(postId);
     setContextDraft(contextMap?.[postId] || "");
@@ -258,7 +292,6 @@ export default function App() {
     }
   };
 
-  // ---------- Per-post toggle ----------
   const togglePostAutoReply = async (postId) => {
     if (!userId) return;
 
@@ -283,8 +316,8 @@ export default function App() {
         },
       }));
 
-      // Optional: refresh posts so AI can reply immediately if new eligible comment exists
-      if (accessToken) await fetchPostsFromBackend(accessToken, userId);
+      // UI refresh optional (not needed for webhook auto reply)
+      // if (accessToken) await fetchPostsFromBackend(accessToken, userId);
     } catch (e) {
       setError(e?.message || "Failed to update post state");
     }
@@ -295,7 +328,7 @@ export default function App() {
       <header className="header">
         <div>
           <h1>Instagram Business Login</h1>
-          <p className="subtitle">Connect Instagram, then backend returns posts and comments.</p>
+          <p className="subtitle">Connect Instagram, set context, enable auto reply.</p>
         </div>
         <div className="header-actions">
           <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
