@@ -4,7 +4,7 @@ import "./App.css";
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
-// IMPORTANT: use SAME-ORIGIN endpoints (no CORS)
+// Same-origin (Vercel rewrite) endpoints
 const TOKEN_ENDPOINT = `/api/instagram-token`;
 const POSTS_ENDPOINT = `/posts`;
 const CONTEXT_ENDPOINT = `/api/context`;
@@ -80,13 +80,26 @@ export default function App() {
     }
   };
 
+  // IMPORTANT: do NOT fail the whole login if this endpoint doesn't exist yet
   const saveTokenToBackend = useCallback(async (uid, token) => {
-    const r = await fetch(SAVE_TOKEN_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId: String(uid), accessToken: String(token) }),
-    });
-    if (!r.ok) throw new Error(await r.text());
+    try {
+      const r = await fetch(SAVE_TOKEN_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: String(uid), accessToken: String(token) }),
+      });
+
+      if (!r.ok) {
+        // swallow 404/500 so old flow still works
+        const txt = await r.text().catch(() => "");
+        console.warn("saveTokenToBackend failed:", r.status, txt);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn("saveTokenToBackend error:", e?.message || e);
+      return false;
+    }
   }, []);
 
   const loadServerConfigs = useCallback(async (uid) => {
@@ -169,11 +182,11 @@ export default function App() {
         setAccessToken(data.access_token);
         setUserId(String(data.user_id));
 
-        // Save token in backend so webhook can auto-reply
-        await saveTokenToBackend(String(data.user_id), data.access_token);
-
         localStorage.setItem("ig_access_token", data.access_token);
         localStorage.setItem("ig_user_id", String(data.user_id));
+
+        // best-effort save for webhook automation (won't break UI if missing)
+        await saveTokenToBackend(String(data.user_id), data.access_token);
 
         clearCodeFromUrl();
 
@@ -208,7 +221,7 @@ export default function App() {
         try {
           setStatus("Restoring session...");
 
-          // keep backend updated for webhook auto reply
+          // best-effort save for webhook automation
           await saveTokenToBackend(storedUserId, storedToken);
 
           await loadServerConfigs(storedUserId);
