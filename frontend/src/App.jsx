@@ -5,7 +5,7 @@ const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
 // CHANGE THIS to your backend base (ngrok or deployed server)
-const API_BASE = "https://YOUR_NGROK_OR_SERVER_URL";
+const API_BASE = "https://7d701c3c835f.ngrok-free.app";
 
 const scopes = [
   "instagram_business_basic",
