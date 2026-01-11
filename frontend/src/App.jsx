@@ -4,14 +4,12 @@ import "./App.css";
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
-const API_BASE = "https://7d701c3c835f.ngrok-free.app";
-
-const TOKEN_ENDPOINT = `${API_BASE}/api/instagram-token`;
-const POSTS_ENDPOINT = `${API_BASE}/posts`;
-
-const CONTEXT_ENDPOINT = `${API_BASE}/api/context`;
-const POSTSTATE_ENDPOINT = `${API_BASE}/api/post-state`;
-const SAVE_TOKEN_ENDPOINT = `${API_BASE}/api/user/token`;
+// IMPORTANT: use SAME-ORIGIN endpoints (no CORS)
+const TOKEN_ENDPOINT = `/api/instagram-token`;
+const POSTS_ENDPOINT = `/posts`;
+const CONTEXT_ENDPOINT = `/api/context`;
+const POSTSTATE_ENDPOINT = `/api/post-state`;
+const SAVE_TOKEN_ENDPOINT = `/api/user/token`;
 
 const scopes = [
   "instagram_business_basic",
@@ -104,7 +102,7 @@ export default function App() {
       setContextMap(ctxJson.contextMap || {});
       setStateMap(stJson.stateMap || {});
     } catch {
-      // non-fatal
+      // ignore
     }
   }, []);
 
@@ -144,6 +142,7 @@ export default function App() {
     async (code) => {
       try {
         setError("");
+
         const response = await fetch(TOKEN_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -170,7 +169,7 @@ export default function App() {
         setAccessToken(data.access_token);
         setUserId(String(data.user_id));
 
-        // REQUIRED: store token in backend so webhook can auto-reply
+        // Save token in backend so webhook can auto-reply
         await saveTokenToBackend(String(data.user_id), data.access_token);
 
         localStorage.setItem("ig_access_token", data.access_token);
@@ -209,7 +208,7 @@ export default function App() {
         try {
           setStatus("Restoring session...");
 
-          // REQUIRED: re-save token to backend after reload (keeps webhook working)
+          // keep backend updated for webhook auto reply
           await saveTokenToBackend(storedUserId, storedToken);
 
           await loadServerConfigs(storedUserId);
@@ -315,9 +314,6 @@ export default function App() {
           sinceMs: json?.state?.sinceMs ?? null,
         },
       }));
-
-      // UI refresh optional (not needed for webhook auto reply)
-      // if (accessToken) await fetchPostsFromBackend(accessToken, userId);
     } catch (e) {
       setError(e?.message || "Failed to update post state");
     }
