@@ -4,12 +4,8 @@ import "./App.css";
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
-// Same-origin (Vercel rewrite) endpoints
-const TOKEN_ENDPOINT = `/api/instagram-token`;
-const POSTS_ENDPOINT = `/posts`;
-const CONTEXT_ENDPOINT = `/api/context`;
-const POSTSTATE_ENDPOINT = `/api/post-state`;
-const SAVE_TOKEN_ENDPOINT = `/api/user/token`;
+// CHANGE THIS to your backend base (ngrok or deployed server)
+const API_BASE = "https://YOUR_NGROK_OR_SERVER_URL";
 
 const scopes = [
   "instagram_business_basic",
@@ -36,10 +32,34 @@ function Modal({ open, title, children, onClose }) {
   );
 }
 
+async function apiFetch(path, { token, ...opts } = {}) {
+  const r = await fetch(`${API_BASE}${path}`, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  const ct = r.headers.get("content-type") || "";
+  const payload = ct.includes("application/json") ? await r.json() : await r.text();
+
+  if (!r.ok) {
+    const msg = typeof payload === "string" ? payload : payload?.error || JSON.stringify(payload);
+    throw new Error(msg || `HTTP ${r.status}`);
+  }
+  return payload;
+}
+
 export default function App() {
+  const [jwtToken, setJwtToken] = useState(localStorage.getItem("jwt_token") || "");
+  const [me, setMe] = useState(null);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
   const [authCode, setAuthCode] = useState("");
-  const [accessToken, setAccessToken] = useState("");
-  const [userId, setUserId] = useState("");
 
   const [posts, setPosts] = useState([]);
   const [contextMap, setContextMap] = useState({});
@@ -63,15 +83,6 @@ export default function App() {
     return `https://www.instagram.com/oauth/authorize?${params.toString()}`;
   }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const incomingCode = params.get("code");
-    if (incomingCode) {
-      setAuthCode(incomingCode.replace(/#_$/, ""));
-      setStatus("Authorization code received. Exchanging for access token...");
-    }
-  }, []);
-
   const clearCodeFromUrl = () => {
     const url = new URL(window.location.href);
     if (url.searchParams.has("code")) {
@@ -80,172 +91,108 @@ export default function App() {
     }
   };
 
-  // IMPORTANT: do NOT fail the whole login if this endpoint doesn't exist yet
-  const saveTokenToBackend = useCallback(async (uid, token) => {
-    try {
-      const r = await fetch(SAVE_TOKEN_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: String(uid), accessToken: String(token) }),
-      });
-
-      if (!r.ok) {
-        // swallow 404/500 so old flow still works
-        const txt = await r.text().catch(() => "");
-        console.warn("saveTokenToBackend failed:", r.status, txt);
-        return false;
-      }
-      return true;
-    } catch (e) {
-      console.warn("saveTokenToBackend error:", e?.message || e);
-      return false;
+  // read IG auth code
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const incomingCode = params.get("code");
+    if (incomingCode) {
+      setAuthCode(incomingCode.replace(/#_$/, ""));
     }
   }, []);
 
-  const loadServerConfigs = useCallback(async (uid) => {
-    try {
-      const [ctxRes, stRes] = await Promise.all([
-        fetch(`${CONTEXT_ENDPOINT}?userId=${encodeURIComponent(uid)}`),
-        fetch(`${POSTSTATE_ENDPOINT}?userId=${encodeURIComponent(uid)}`),
-      ]);
-
-      const ctxJson = ctxRes.ok ? await ctxRes.json() : { contextMap: {} };
-      const stJson = stRes.ok ? await stRes.json() : { stateMap: {} };
-
-      setContextMap(ctxJson.contextMap || {});
-      setStateMap(stJson.stateMap || {});
-    } catch {
-      // ignore
-    }
+  const loadMe = useCallback(async (token) => {
+    const data = await apiFetch("/api/me", { token });
+    setMe(data);
   }, []);
-
-  const fetchPostsFromBackend = useCallback(async (token, igUserId) => {
-    try {
-      setError("");
-      setStatus("Loading posts...");
-
-      const resp = await fetch(POSTS_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token: token, user_id: String(igUserId) }),
-      });
-
-      const ct = resp.headers.get("content-type") || "";
-      if (!resp.ok) {
-        const msg = ct.includes("application/json")
-          ? JSON.stringify(await resp.json())
-          : await resp.text();
-        throw new Error(msg || "Failed to load posts");
-      }
-
-      const json = await resp.json();
-      setPosts(json?.posts || []);
-
-      if (json?.contextMap) setContextMap(json.contextMap);
-      if (json?.stateMap) setStateMap(json.stateMap);
-
-      setStatus("Connected");
-    } catch (e) {
-      setError(e?.message || "Unable to load posts.");
-      setStatus("");
-    }
-  }, []);
-
-  const exchangeCodeForToken = useCallback(
-    async (code) => {
-      try {
-        setError("");
-
-        const response = await fetch(TOKEN_ENDPOINT, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            client_id: APP_ID,
-            redirect_uri: REDIRECT_URI,
-            code,
-          }),
-        });
-
-        const ct = response.headers.get("content-type") || "";
-        if (!response.ok) {
-          const msg = ct.includes("application/json")
-            ? JSON.stringify(await response.json())
-            : await response.text();
-          throw new Error(msg || "Token exchange failed");
-        }
-
-        const data = await response.json();
-        if (!data.access_token || !data.user_id) {
-          throw new Error("Token endpoint missing access_token/user_id");
-        }
-
-        setAccessToken(data.access_token);
-        setUserId(String(data.user_id));
-
-        localStorage.setItem("ig_access_token", data.access_token);
-        localStorage.setItem("ig_user_id", String(data.user_id));
-
-        // best-effort save for webhook automation (won't break UI if missing)
-        await saveTokenToBackend(String(data.user_id), data.access_token);
-
-        clearCodeFromUrl();
-
-        await loadServerConfigs(String(data.user_id));
-        await fetchPostsFromBackend(data.access_token, data.user_id);
-      } catch (e) {
-        setError(e?.message || "Token exchange failed.");
-        setStatus("");
-      }
-    },
-    [fetchPostsFromBackend, loadServerConfigs, saveTokenToBackend]
-  );
 
   useEffect(() => {
-    if (!authCode) return;
-    if (accessToken) {
-      clearCodeFromUrl();
-      return;
-    }
-    exchangeCodeForToken(authCode);
-  }, [authCode, accessToken, exchangeCodeForToken]);
+    if (!jwtToken) return;
+    loadMe(jwtToken).catch(() => {
+      localStorage.removeItem("jwt_token");
+      setJwtToken("");
+      setMe(null);
+    });
+  }, [jwtToken, loadMe]);
 
-  useEffect(() => {
-    const storedToken = localStorage.getItem("ig_access_token");
-    const storedUserId = localStorage.getItem("ig_user_id");
+  const signup = async () => {
+    setError("");
+    setStatus("Signing up...");
+    const data = await apiFetch("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    localStorage.setItem("jwt_token", data.token);
+    setJwtToken(data.token);
+    setStatus("Signed up");
+  };
 
-    if (storedToken && storedUserId && !accessToken) {
-      setAccessToken(storedToken);
-      setUserId(storedUserId);
+  const login = async () => {
+    setError("");
+    setStatus("Logging in...");
+    const data = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    localStorage.setItem("jwt_token", data.token);
+    setJwtToken(data.token);
+    setStatus("Logged in");
+  };
 
-      (async () => {
-        try {
-          setStatus("Restoring session...");
-
-          // best-effort save for webhook automation
-          await saveTokenToBackend(storedUserId, storedToken);
-
-          await loadServerConfigs(storedUserId);
-          await fetchPostsFromBackend(storedToken, storedUserId);
-        } catch (e) {
-          setError(e?.message || "Failed to restore session");
-          setStatus("");
-        }
-      })();
-    }
-  }, [accessToken, fetchPostsFromBackend, loadServerConfigs, saveTokenToBackend]);
-
-  const handleLogout = () => {
-    localStorage.removeItem("ig_access_token");
-    localStorage.removeItem("ig_user_id");
-    setAuthCode("");
-    setAccessToken("");
-    setUserId("");
+  const logout = () => {
+    localStorage.removeItem("jwt_token");
+    setJwtToken("");
+    setMe(null);
     setPosts([]);
     setContextMap({});
     setStateMap({});
-    setStatus("Logged out.");
+    setStatus("Logged out");
     setError("");
   };
+
+  const connectInstagram = async () => {
+    if (!jwtToken || !authCode) return;
+    setError("");
+    setStatus("Connecting Instagram...");
+    await apiFetch("/api/instagram-token", {
+      token: jwtToken,
+      method: "POST",
+      body: JSON.stringify({
+        client_id: APP_ID,
+        redirect_uri: REDIRECT_URI,
+        code: authCode,
+      }),
+    });
+    clearCodeFromUrl();
+    setAuthCode("");
+    await loadMe(jwtToken);
+    setStatus("Instagram connected");
+  };
+
+  const loadServerConfigs = useCallback(async () => {
+    if (!jwtToken) return;
+    const [ctx, st] = await Promise.all([
+      apiFetch("/api/context", { token: jwtToken }),
+      apiFetch("/api/post-state", { token: jwtToken }),
+    ]);
+    setContextMap(ctx.contextMap || {});
+    setStateMap(st.stateMap || {});
+  }, [jwtToken]);
+
+  const fetchPosts = useCallback(async () => {
+    if (!jwtToken) return;
+    setError("");
+    setStatus("Loading posts...");
+    const json = await apiFetch("/posts", { token: jwtToken, method: "POST", body: JSON.stringify({}) });
+    setPosts(json.posts || []);
+    if (json.contextMap) setContextMap(json.contextMap);
+    if (json.stateMap) setStateMap(json.stateMap);
+    setStatus("Connected");
+  }, [jwtToken]);
+
+  useEffect(() => {
+    if (!jwtToken) return;
+    loadServerConfigs().catch(() => {});
+  }, [jwtToken, loadServerConfigs]);
 
   const openContextModal = (postId) => {
     setActivePostId(postId);
@@ -260,94 +207,75 @@ export default function App() {
   };
 
   const saveContext = async () => {
-    if (!activePostId || !userId) return;
+    if (!jwtToken || !activePostId) return;
     const text = contextDraft.trim();
     if (!text) return;
 
-    try {
-      const r = await fetch(CONTEXT_ENDPOINT, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, postId: activePostId, text }),
-      });
+    setError("");
+    await apiFetch("/api/context", {
+      token: jwtToken,
+      method: "PUT",
+      body: JSON.stringify({ postId: activePostId, text }),
+    });
 
-      if (!r.ok) throw new Error(await r.text());
-
-      setContextMap((prev) => ({ ...prev, [activePostId]: text }));
-      setStatus("Context saved");
-    } catch (e) {
-      setError(e?.message || "Failed to save context");
-    }
+    setContextMap((prev) => ({ ...prev, [activePostId]: text }));
+    setStatus("Context saved");
   };
 
   const deleteContext = async () => {
-    if (!activePostId || !userId) return;
+    if (!jwtToken || !activePostId) return;
+    setError("");
+    await apiFetch("/api/context", {
+      token: jwtToken,
+      method: "DELETE",
+      body: JSON.stringify({ postId: activePostId }),
+    });
 
-    try {
-      const r = await fetch(CONTEXT_ENDPOINT, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, postId: activePostId }),
-      });
-
-      if (!r.ok) throw new Error(await r.text());
-
-      setContextMap((prev) => {
-        const next = { ...prev };
-        delete next[activePostId];
-        return next;
-      });
-      setContextDraft("");
-      setStatus("Context deleted");
-    } catch (e) {
-      setError(e?.message || "Failed to delete context");
-    }
+    setContextMap((prev) => {
+      const next = { ...prev };
+      delete next[activePostId];
+      return next;
+    });
+    setContextDraft("");
+    setStatus("Context deleted");
   };
 
   const togglePostAutoReply = async (postId) => {
-    if (!userId) return;
+    if (!jwtToken) return;
 
     const current = Boolean(stateMap?.[postId]?.autoReplyEnabled);
     const next = !current;
 
-    try {
-      const r = await fetch(POSTSTATE_ENDPOINT, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, postId, enabled: next }),
-      });
+    setError("");
+    const json = await apiFetch("/api/post-state", {
+      token: jwtToken,
+      method: "PUT",
+      body: JSON.stringify({ postId, enabled: next }),
+    });
 
-      if (!r.ok) throw new Error(await r.text());
-      const json = await r.json();
-
-      setStateMap((prev) => ({
-        ...prev,
-        [postId]: {
-          autoReplyEnabled: Boolean(json?.state?.autoReplyEnabled),
-          sinceMs: json?.state?.sinceMs ?? null,
-        },
-      }));
-    } catch (e) {
-      setError(e?.message || "Failed to update post state");
-    }
+    setStateMap((prev) => ({
+      ...prev,
+      [postId]: {
+        autoReplyEnabled: Boolean(json?.state?.autoReplyEnabled),
+        sinceMs: json?.state?.sinceMs ?? null,
+      },
+    }));
   };
 
   return (
     <main className="page">
       <header className="header">
         <div>
-          <h1>Instagram Business Login</h1>
-          <p className="subtitle">Connect Instagram, set context, enable auto reply.</p>
+          <h1>SocialAI</h1>
+          <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
         </div>
+
         <div className="header-actions">
-          <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
-            Connect account
-          </button>
-          {accessToken && (
-            <button className="ghost-btn" type="button" onClick={handleLogout}>
+          {jwtToken ? (
+            <button className="ghost-btn" type="button" onClick={logout}>
               Log out
             </button>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -356,109 +284,145 @@ export default function App() {
         {error && <div className="error-chip">Error: {error}</div>}
       </section>
 
-      <section className="token-box">
-        <h2>Auth details</h2>
-        <div className="token-grid">
-          <div>
-            <p className="label">Authorization code</p>
-            <code className="code-block">{authCode || "Not received yet"}</code>
+      {!jwtToken ? (
+        <section className="token-box">
+          <h2>Sign up / Login</h2>
+          <div className="token-grid">
+            <div>
+              <p className="label">Email</p>
+              <input className="code-block" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <div>
+              <p className="label">Password</p>
+              <input className="code-block" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            </div>
           </div>
-          <div>
-            <p className="label">Access token</p>
-            <code className="code-block">{accessToken || "No token yet"}</code>
+          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <button className="primary-btn" type="button" onClick={() => signup().catch((e) => setError(e.message))}>
+              Sign up
+            </button>
+            <button className="ghost-btn" type="button" onClick={() => login().catch((e) => setError(e.message))}>
+              Login
+            </button>
           </div>
-          <div>
-            <p className="label">Instagram user id</p>
-            <code className="code-block">{userId || "Unknown"}</code>
-          </div>
-        </div>
+        </section>
+      ) : (
+        <>
+          <section className="token-box">
+            <h2>Account</h2>
+            <div className="token-grid">
+              <div>
+                <p className="label">Email</p>
+                <code className="code-block">{me?.user?.email || "..."}</code>
+              </div>
+              <div>
+                <p className="label">Instagram connected</p>
+                <code className="code-block">{me?.instagramConnected ? `Yes (${me.igUserId})` : "No"}</code>
+              </div>
+              <div>
+                <p className="label">Instagram auth code</p>
+                <code className="code-block">{authCode || "Not received"}</code>
+              </div>
+            </div>
 
-        {accessToken && userId && (
-          <button className="ghost-btn" type="button" onClick={() => fetchPostsFromBackend(accessToken, userId)}>
-            Refresh posts
-          </button>
-        )}
-      </section>
+            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+              <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
+                Connect Instagram
+              </button>
+              {authCode && (
+                <button
+                  className="ghost-btn"
+                  type="button"
+                  onClick={() => connectInstagram().catch((e) => setError(e.message))}
+                >
+                  Save Instagram Connection
+                </button>
+              )}
+              <button className="ghost-btn" type="button" onClick={() => fetchPosts().catch((e) => setError(e.message))}>
+                Load posts
+              </button>
+            </div>
+          </section>
 
-      <section className="posts">
-        <h2>Recent posts</h2>
-        {!posts.length && <p className="muted">No posts loaded yet.</p>}
+          <section className="posts">
+            <h2>Recent posts</h2>
+            {!posts.length && <p className="muted">No posts loaded yet.</p>}
 
-        <div className="media-grid">
-          {posts.map((p) => {
-            const ctx = contextMap?.[p.id] || "";
-            const enabled = Boolean(stateMap?.[p.id]?.autoReplyEnabled);
+            <div className="media-grid">
+              {posts.map((p) => {
+                const ctx = contextMap?.[p.id] || "";
+                const enabled = Boolean(stateMap?.[p.id]?.autoReplyEnabled);
 
-            return (
-              <article key={p.id} className="card">
-                <div className="card-top">
-                  <p className="label">{p.media_type}</p>
-                  <a href={p.permalink} target="_blank" rel="noreferrer">
-                    View on Instagram
-                  </a>
-                </div>
+                return (
+                  <article key={p.id} className="card">
+                    <div className="card-top">
+                      <p className="label">{p.media_type}</p>
+                      <a href={p.permalink} target="_blank" rel="noreferrer">
+                        View on Instagram
+                      </a>
+                    </div>
 
-                <p className="caption">{p.caption || "No caption"}</p>
-                <p className="timestamp">{p.timestamp}</p>
+                    <p className="caption">{p.caption || "No caption"}</p>
+                    <p className="timestamp">{p.timestamp}</p>
 
-                <div className="card-actions">
-                  <button className="ghost-btn small-btn" type="button" onClick={() => openContextModal(p.id)}>
-                    {ctx ? "Edit context" : "Add context"}
-                  </button>
+                    <div className="card-actions">
+                      <button className="ghost-btn small-btn" type="button" onClick={() => openContextModal(p.id)}>
+                        {ctx ? "Edit context" : "Add context"}
+                      </button>
 
-                  {ctx && <span className="chip">Context saved</span>}
+                      {ctx && <span className="chip">Context saved</span>}
 
-                  <button
-                    type="button"
-                    className={enabled ? "toggle-btn on" : "toggle-btn off"}
-                    onClick={() => togglePostAutoReply(p.id)}
-                    disabled={!accessToken}
-                    title={!accessToken ? "Connect account first" : ""}
-                  >
-                    {enabled ? "AI Reply ON" : "AI Reply OFF"}
-                  </button>
-                </div>
+                      <button
+                        type="button"
+                        className={enabled ? "toggle-btn on" : "toggle-btn off"}
+                        onClick={() => togglePostAutoReply(p.id).catch((e) => setError(e.message))}
+                      >
+                        {enabled ? "AI Reply ON" : "AI Reply OFF"}
+                      </button>
+                    </div>
 
-                <div className="comments">
-                  <p className="label">Comments</p>
-                  {p.comments?.length ? (
-                    <ul>
-                      {p.comments.map((c) => (
-                        <li key={c.id}>
-                          <span className="comment-user">{c.username || "unknown"}</span>: {c.text}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="muted small">No comments found.</p>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+                    <div className="comments">
+                      <p className="label">Comments</p>
+                      {p.comments?.length ? (
+                        <ul>
+                          {p.comments.map((c) => (
+                            <li key={c.id}>
+                              <span className="comment-user">{c.username || "unknown"}</span>: {c.text}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="muted small">No comments found.</p>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
 
-      <Modal open={contextModalOpen} title="Post context" onClose={closeContextModal}>
-        <p className="muted small">This context is stored in MongoDB and used by AI replies for this post.</p>
+          <Modal open={contextModalOpen} title="Post context" onClose={closeContextModal}>
+            <p className="muted small">Saved in MongoDB. Used for AI replies on this post.</p>
 
-        <textarea
-          className="context-textarea"
-          rows={7}
-          value={contextDraft}
-          onChange={(e) => setContextDraft(e.target.value)}
-          placeholder="Write context for this post..."
-        />
+            <textarea
+              className="context-textarea"
+              rows={7}
+              value={contextDraft}
+              onChange={(e) => setContextDraft(e.target.value)}
+              placeholder="Write context for this post..."
+            />
 
-        <div className="modal-actions">
-          <button className="primary-btn" type="button" onClick={saveContext}>
-            Save
-          </button>
-          <button className="danger-btn" type="button" onClick={deleteContext}>
-            Delete
-          </button>
-        </div>
-      </Modal>
+            <div className="modal-actions">
+              <button className="primary-btn" type="button" onClick={() => saveContext().catch((e) => setError(e.message))}>
+                Save
+              </button>
+              <button className="danger-btn" type="button" onClick={() => deleteContext().catch((e) => setError(e.message))}>
+                Delete
+              </button>
+            </div>
+          </Modal>
+        </>
+      )}
     </main>
   );
 }
