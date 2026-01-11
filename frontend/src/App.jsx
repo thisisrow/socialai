@@ -1,10 +1,11 @@
+// App.jsx (frontend)
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
-// CHANGE THIS to your backend base (ngrok or deployed server)
+// backend base (ngrok or deployed)
 const API_BASE = "https://7d701c3c835f.ngrok-free.app";
 
 const scopes = [
@@ -91,13 +92,10 @@ export default function App() {
     }
   };
 
-  // read IG auth code
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const incomingCode = params.get("code");
-    if (incomingCode) {
-      setAuthCode(incomingCode.replace(/#_$/, ""));
-    }
+    if (incomingCode) setAuthCode(incomingCode.replace(/#_$/, ""));
   }, []);
 
   const loadMe = useCallback(async (token) => {
@@ -242,7 +240,6 @@ export default function App() {
 
   const togglePostAutoReply = async (postId) => {
     if (!jwtToken) return;
-
     const current = Boolean(stateMap?.[postId]?.autoReplyEnabled);
     const next = !current;
 
@@ -269,7 +266,6 @@ export default function App() {
           <h1>SocialAI</h1>
           <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
         </div>
-
         <div className="header-actions">
           {jwtToken ? (
             <button className="ghost-btn" type="button" onClick={logout}>
@@ -294,7 +290,12 @@ export default function App() {
             </div>
             <div>
               <p className="label">Password</p>
-              <input className="code-block" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <input
+                className="code-block"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             </div>
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
@@ -317,11 +318,19 @@ export default function App() {
               </div>
               <div>
                 <p className="label">Instagram connected</p>
-                <code className="code-block">{me?.instagramConnected ? `Yes (${me.igUserId})` : "No"}</code>
+                <code className="code-block">{me?.instagramConnected ? "Yes" : "No"}</code>
               </div>
               <div>
                 <p className="label">Instagram auth code</p>
                 <code className="code-block">{authCode || "Not received"}</code>
+              </div>
+              <div>
+                <p className="label">Basic User ID</p>
+                <code className="code-block">{me?.basicUserId || "—"}</code>
+              </div>
+              <div>
+                <p className="label">Business IG ID (webhook)</p>
+                <code className="code-block">{me?.igBusinessId || "—"}</code>
               </div>
             </div>
 
@@ -330,11 +339,7 @@ export default function App() {
                 Connect Instagram
               </button>
               {authCode && (
-                <button
-                  className="ghost-btn"
-                  type="button"
-                  onClick={() => connectInstagram().catch((e) => setError(e.message))}
-                >
+                <button className="ghost-btn" type="button" onClick={() => connectInstagram().catch((e) => setError(e.message))}>
                   Save Instagram Connection
                 </button>
               )}
