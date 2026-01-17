@@ -31,8 +31,8 @@ const IgAccountSchema = new mongoose.Schema(
 );
 
 // indexes ONLY here (avoid duplicate warning)
-IgAccountSchema.index({ basicUserId: 1 });
-IgAccountSchema.index({ igBusinessId: 1 });
+IgAccountSchema.index({ basicUserId: 1 }, { unique: true, sparse: true });
+IgAccountSchema.index({ igBusinessId: 1 }, { unique: true, sparse: true });
 
 const IgAccount = mongoose.model("IgAccount", IgAccountSchema);
 

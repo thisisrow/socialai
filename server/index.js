@@ -37,7 +37,9 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 console.log("Global constants initialized");
-
+app.get("/", (req, res) => {
+  res.send("Rumo Server is running.");
+})
 function must(v, name) {
   // console.log(`Checking requirement for: ${name}`);
   if (!v) {
@@ -46,6 +48,13 @@ function must(v, name) {
   }
   // console.log(`Requirement met for: ${name}`);
   return v;
+}
+
+function redactToken(token) {
+  if (!token) return "";
+  const s = String(token);
+  if (s.length <= 12) return "****";
+  return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
 function signToken(user) {
@@ -157,8 +166,29 @@ app.get("/api/me", authMiddleware, async (req, res) => {
     ok: true,
     user: { id: String(user._id), email: user.email },
     instagramConnected: !!ig,
-    igUserId: ig?.igUserId || null,
+    basicUserId: ig?.basicUserId || null,
+    igBusinessId: ig?.igBusinessId || null,
   });
+});
+
+// Save IG business id manually (helps webhook mapping)
+app.post("/api/instagram-business-id", authMiddleware, async (req, res) => {
+  console.log(`POST /api/instagram-business-id called for user: ${req.appUserId}`);
+  try {
+    const { igBusinessId } = req.body || {};
+    must(igBusinessId, "igBusinessId");
+
+    const updated = await IgAccount.findOneAndUpdate(
+      { appUserId: req.appUserId },
+      { igBusinessId: String(igBusinessId) },
+      { new: true }
+    ).lean();
+
+    if (!updated) return res.status(400).json({ error: "Instagram not connected yet" });
+    return res.json({ ok: true, igBusinessId: updated.igBusinessId });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 });
 
 // ---------- Instagram OAuth exchange ----------
@@ -191,24 +221,25 @@ app.post("/api/instagram-token", authMiddleware, async (req, res) => {
        return res.status(500).json({ error: "Instagram token response missing fields" });
     }
      console.log(`Received IG User ID: ${user_id}. Saving to DB.`);
+     console.log(`Received access token: ${redactToken(access_token)}`);
 
-    // Save mapping appUserId <-> igUserId + token
+    // Save mapping appUserId <-> basicUserId + token
     await IgAccount.findOneAndUpdate(
       { appUserId: req.appUserId },
-      { igUserId: String(user_id), accessToken: String(access_token) },
+      { basicUserId: String(user_id), accessToken: String(access_token) },
       { upsert: true, new: true }
     );
      console.log(`Saved mapping for app user ${req.appUserId}`);
 
-    // ensure unique igUserId points to this user (if someone reconnects)
+    // ensure unique basicUserId points to this user (if someone reconnects)
     await IgAccount.findOneAndUpdate(
-      { igUserId: String(user_id) },
+      { basicUserId: String(user_id) },
       { appUserId: req.appUserId, accessToken: String(access_token) },
       { upsert: true, new: true }
     );
      console.log(`Ensured unique mapping for IG user ${user_id}`);
 
-    return res.json({ ok: true, igUserId: String(user_id) });
+    return res.json({ ok: true, basicUserId: String(user_id) });
   } catch (e) {
     console.error("Instagram token exchange error:", e?.response?.data || e.message);
     return res.status(500).json({ error: e?.response?.data || e.message });
@@ -226,7 +257,7 @@ app.post("/posts", authMiddleware, async (req, res) => {
     }
 
     const access_token = ig.accessToken;
-    const user_id = ig.igUserId;
+    const user_id = ig.basicUserId;
     console.log(`Fetching posts for IG User ID: ${user_id}`);
 
     const mediaResp = await axios.get(`https://graph.instagram.com/${user_id}/media`, {
@@ -376,10 +407,26 @@ Rules:
 
 async function replyToComment({ commentId, message, accessToken }) {
   console.log(`Replying to comment: ${commentId}`);
-  const url = `https://graph.instagram.com/${commentId}/replies`;
+  console.log(`Using access token: ${redactToken(accessToken)}`);
+  const fbGraphVersion = process.env.FB_GRAPH_VERSION || "v19.0";
+  const urls = [
+    `https://graph.facebook.com/${fbGraphVersion}/${commentId}/replies`,
+    `https://graph.instagram.com/${commentId}/replies`,
+  ];
   try {
-    await axios.post(url, null, { params: { message, access_token: accessToken } });
-    console.log("Successfully posted reply to Instagram.");
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        console.log(`POST ${url} message="${String(message || "").slice(0, 200)}"`);
+        await axios.post(url, null, { params: { message, access_token: accessToken } });
+        console.log("Successfully posted reply to Instagram.");
+        return;
+      } catch (e) {
+        lastErr = e;
+        console.error("Reply attempt failed:", url, e?.response?.data || e.message);
+      }
+    }
+    throw lastErr || new Error("All reply attempts failed");
   } catch (e) {
     console.error("Failed to post reply to Instagram:", e?.response?.data || e.message);
     throw e; // re-throw to be caught by webhook handler
@@ -426,29 +473,15 @@ app.post("/api/instagram-webhook", async (req, res) => {
 
   try {
     for (const entry of body.entry || []) {
-      const igUserId = String(entry.id || "");
-      if (!igUserId) {
-        console.log("Skipping entry, no IG User ID found.");
+      const igBusinessId = String(entry.id || "");
+      if (!igBusinessId) {
+        console.log("Skipping entry, no IG Business ID found.");
         continue;
       }
-      console.log(`Processing entry for IG User ID: ${igUserId}`);
-
-      // Find which app user owns this IG user id
-      console.log("Webhook entry.id (igBusinessId):", igUserId);
-const ig = await IgAccount.findOne({ igBusinessId: igUserId }).lean();
-console.log("DB match:", ig ? { appUserId: ig.appUserId, igBusinessId: ig.igBusinessId, basicUserId: ig.basicUserId } : null);
-
-      if (!ig?.accessToken || !ig?.appUserId) {
-        console.log(`Skipping: No app user found for IG User ID ${igUserId}.`);
-        continue;
-      }
-      console.log(`Found App User ${ig.appUserId} for IG User ${igUserId}.`);
+      console.log(`Processing entry for IG Business ID: ${igBusinessId}`);
 
       for (const change of entry.changes || []) {
-        if (change.field !== "comments") {
-          // console.log(`Skipping change, field is not 'comments' (is '${change.field}').`);
-          continue;
-        }
+        if (change.field !== "comments") continue;
         console.log("Processing 'comments' field change.");
 
         const commentData = change.value || {};
@@ -457,7 +490,9 @@ console.log("DB match:", ig ? { appUserId: ig.appUserId, igBusinessId: ig.igBusi
         const commenterId = String(commentData.from?.id || "");
         const postId = String(extractPostId(commentData) || "");
 
-        console.log(`Comment Data: commentId=${commentId}, postId=${postId}, parentId=${parentId}, commenterId=${commenterId}`);
+        console.log(
+          `Comment Data: commentId=${commentId}, postId=${postId}, parentId=${parentId}, commenterId=${commenterId}`
+        );
 
         if (!commentId || !postId) {
           console.log("Skipping: Missing commentId or postId.");
@@ -467,8 +502,57 @@ console.log("DB match:", ig ? { appUserId: ig.appUserId, igBusinessId: ig.igBusi
           console.log("Skipping: Is a reply to another comment (has parentId).");
           continue;
         }
-        if (commenterId && commenterId === igUserId) {
+        if (commenterId && commenterId === igBusinessId) {
           console.log("Skipping: Comment is from the page owner (avoiding loop).");
+          continue;
+        }
+
+        // Resolve which app user owns this webhook event.
+        let ig = await IgAccount.findOne({ igBusinessId }).lean();
+        if (!ig) {
+          // Some setups only store the Basic Display user id; try that too.
+          ig = await IgAccount.findOne({ basicUserId: igBusinessId }).lean();
+        }
+
+        if (!ig) {
+          // Infer ownership by postId (auto-reply state/context saved via UI uses the app user id).
+          const stateAny = await PostState.findOne({ postId: String(postId) }).lean();
+          const ctxAny = stateAny ? null : await Context.findOne({ postId: String(postId) }).lean();
+          const inferredAppUserId = stateAny?.appUserId || ctxAny?.appUserId || null;
+
+          if (inferredAppUserId) {
+            console.log(`Inferred app user via postId=${postId}: ${String(inferredAppUserId)}`);
+            ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+            if (ig?.appUserId && !ig.igBusinessId) {
+              console.log(`Binding igBusinessId=${igBusinessId} to appUserId=${String(ig.appUserId)}`);
+              await IgAccount.updateOne({ appUserId: ig.appUserId }, { igBusinessId });
+              ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+            } else if (ig?.igBusinessId && ig.igBusinessId !== igBusinessId) {
+              console.log(
+                `Not binding igBusinessId=${igBusinessId}; existing igBusinessId=${ig.igBusinessId} for appUserId=${String(
+                  ig.appUserId
+                )}`
+              );
+            }
+          }
+        }
+
+        if (!ig) {
+          console.log(
+            `Skipping: No IgAccount mapping for igBusinessId=${igBusinessId}. Set it via POST /api/instagram-business-id.`
+          );
+          continue;
+        }
+
+        console.log("DB match:", {
+          appUserId: String(ig.appUserId),
+          igBusinessId: ig.igBusinessId,
+          basicUserId: ig.basicUserId,
+          accessToken: redactToken(ig.accessToken),
+        });
+
+        if (!ig?.accessToken || !ig?.appUserId) {
+          console.log(`Skipping: IgAccount missing accessToken/appUserId for igBusinessId=${igBusinessId}.`);
           continue;
         }
 
@@ -490,7 +574,9 @@ console.log("DB match:", ig ? { appUserId: ig.appUserId, igBusinessId: ig.igBusi
         console.log(`Using context of length ${contextText.length}`);
 
         const userText = String(commentData.text || "");
+        console.log(`Incoming comment text: "${userText}"`);
         const reply = await generateReply(userText, contextText);
+        console.log(`Reply text: "${reply}"`);
 
         await replyToComment({ commentId, message: reply, accessToken: ig.accessToken });
         await Replied.create({ appUserId: ig.appUserId, postId, commentId });
@@ -498,8 +584,8 @@ console.log("DB match:", ig ? { appUserId: ig.appUserId, igBusinessId: ig.igBusi
       }
     }
   } catch (e) {
-    console.error("Webhook error:", e?.response?.data || e.message);
-  }
+	    console.error("Webhook error:", e?.response?.data || e.message);
+	  }
 });
 
 // ---------- START ----------
