@@ -1,0 +1,112 @@
+const express = require("express");
+const axios = require("axios");
+// FIX: Correct package name
+const { GoogleGenerativeAI } = require("@google/generative-ai"); 
+require('dotenv').config();
+
+const app = express();
+app.use(express.json());
+const port = 3000;
+
+// Initialize Gemini once at the top
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+const pastaContent = "White sauce pasta at Rumo Restaurant is a creamy pasta dish made with a smooth béchamel sauce (butter, flour, and milk). It has a mild, rich flavor and a soft, silky texture. At Rumo, the pasta is prepared fresh and typically includes vegetables like mushrooms, sweet corn, and bell peppers, or proteins such as chicken. It’s delicately flavored with garlic, herbs, black pepper, and cheese, making it comforting, rich, and non-spicy.";
+
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN; 
+
+async function generateReply(comment, context) {
+  try {
+    // FIX: Use 1.5-flash or 2.0-flash (check your available models)
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+    const prompt = `
+      You are a friendly customer support agent for Rumo Restaurant.
+      Rules:
+      - Answer ONLY using the provided context.
+      - If the answer isn't in the context, be polite but do not invent details with littly word form context if possible.
+      - Return EXACTLY ONE sentence.
+      - User Comment: "${comment}"
+      - Context: "${context}"
+    `;
+
+    // FIX: Simplified call structure
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text().trim();
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    return "Thank you for reaching out! We'd love to have you try our pasta. 😊"; // Fallback
+  }
+}
+
+// ... rest of your logging and processedEvents logic ...
+
+const processedEvents = new Set();
+
+function log(title, obj) {
+  console.log(`\n=== ${title} ===`);
+  if (obj !== undefined) console.dir(obj, { depth: 10 });
+}
+
+async function replyToComment(commentId, message) {
+  const url = `https://graph.instagram.com/${commentId}/replies`;
+  const r = await axios.post(url, null, {
+    params: { message, access_token: PAGE_ACCESS_TOKEN },
+  });
+  return r.data;
+}
+
+app.get("/api/instagram-webhook", (req, res) => {
+  if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.status(200).send(req.query["hub.challenge"]);
+  }
+  return res.status(200).send("Webhook active");
+});
+
+app.post("/api/instagram-webhook", async (req, res) => {
+  res.sendStatus(200); // Instagram needs this immediately
+
+  const body = req.body;
+  if (body.object !== "instagram") return;
+
+  try {
+    for (const entry of body.entry || []) {
+      const myBusinessId = entry.id; 
+
+      for (const change of entry.changes || []) {
+        if (change.field !== "comments") continue;
+
+        const commentData = change.value || {};
+        const commentId = commentData.id;
+        const commenterId = commentData.from?.id;
+        const parentId = commentData.parent_id;
+
+        // Loop Prevention
+        if (commenterId === myBusinessId || parentId || processedEvents.has(commentId)) {
+          continue;
+        }
+
+        log("NEW COMMENT", commentData.text);
+
+        try {
+          const reply = await generateReply(commentData.text, pastaContent);
+          const out = await replyToComment(commentId, reply);
+          
+          log("✅ REPLY SUCCESS", { to: commentData.text, reply: reply });
+          
+          processedEvents.add(commentId);
+          setTimeout(() => processedEvents.delete(commentId), 3600000);
+        } catch (e) {
+          log("❌ REPLY ERROR", e?.response?.data || e.message);
+        }
+      }
+    }
+  } catch (e) {
+    log("❌ GLOBAL ERROR", e.message);
+  }
+});
+
+
+app.listen(port, () => console.log(`Server running on port ${port}`));
