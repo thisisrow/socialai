@@ -1,12 +1,11 @@
 // App.jsx (frontend)
 import { useCallback, useEffect, useMemo, useState } from "react";
+import PropTypes from "prop-types";
 import "./App.css";
 import "./index.css";
 
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
-
-// backend base (ngrok or deployed)
 const API_BASE = "https://93ab3478978c.ngrok-free.app";
 
 const scopes = [
@@ -33,6 +32,14 @@ function Modal({ open, title, children, onClose }) {
     </div>
   );
 }
+
+Modal.propTypes = {
+  open: PropTypes.bool.isRequired,
+  title: PropTypes.string.isRequired,
+  children: PropTypes.node.isRequired,
+  onClose: PropTypes.func.isRequired,
+};
+
 
 async function apiFetch(path, { token, ...opts } = {}) {
   const r = await fetch(`${API_BASE}${path}`, {
@@ -263,10 +270,8 @@ export default function App() {
   return (
     <main className="page">
       <header className="header">
-        <div>
-          <h1>SocialAI</h1>
-          <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
-        </div>
+        <h1>SocialAI</h1>
+        <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
         <div className="header-actions">
           {jwtToken ? (
             <button className="ghost-btn" type="button" onClick={logout}>
@@ -275,7 +280,6 @@ export default function App() {
           ) : null}
         </div>
       </header>
-
       <section className="status-bar">
         {status && <div className="status-chip">{status}</div>}
         {error && <div className="error-chip">Error: {error}</div>}
@@ -299,7 +303,7 @@ export default function App() {
               />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+          <div className="button-container">
             <button className="primary-btn" type="button" onClick={() => signup().catch((e) => setError(e.message))}>
               Sign up
             </button>
@@ -335,7 +339,7 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+            <div className="button-container">
               <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
                 Connect Instagram
               </button>
