@@ -1,12 +1,13 @@
 // App.jsx (frontend)
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./App.css";
+import "./index.css";
 
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
 
 // backend base (ngrok or deployed)
-const API_BASE = "https://7d701c3c835f.ngrok-free.app";
+const API_BASE = "https://93ab3478978c.ngrok-free.app";
 
 const scopes = [
   "instagram_business_basic",
