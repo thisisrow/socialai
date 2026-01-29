@@ -1,4 +1,4 @@
-// db.js (complete file)
+// db.js (COMPLETE)
 const mongoose = require("mongoose");
 
 function log(...args) {
@@ -32,7 +32,6 @@ const IgAccountSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// indexes ONLY here (avoid duplicate warning)
 IgAccountSchema.index({ basicUserId: 1 }, { unique: true, sparse: true });
 IgAccountSchema.index({ igBusinessId: 1 }, { unique: true, sparse: true });
 
