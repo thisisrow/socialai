@@ -223,21 +223,21 @@ app.post("/api/instagram-token", authMiddleware, async (req, res) => {
      console.log(`Received IG User ID: ${user_id}. Saving to DB.`);
      console.log(`Received access token: ${redactToken(access_token)}`);
 
-    // Save mapping appUserId <-> basicUserId + token
-    await IgAccount.findOneAndUpdate(
-      { appUserId: req.appUserId },
-      { basicUserId: String(user_id), accessToken: String(access_token) },
-      { upsert: true, new: true }
-    );
-     console.log(`Saved mapping for app user ${req.appUserId}`);
+    // Delete any existing connections for this user (handles reconnections)
+    await IgAccount.deleteMany({ appUserId: req.appUserId });
+    console.log(`Deleted old IG connections for app user ${req.appUserId}`);
 
-    // ensure unique basicUserId points to this user (if someone reconnects)
-    await IgAccount.findOneAndUpdate(
-      { basicUserId: String(user_id) },
-      { appUserId: req.appUserId, accessToken: String(access_token) },
-      { upsert: true, new: true }
-    );
-     console.log(`Ensured unique mapping for IG user ${user_id}`);
+    // Delete any existing connections for this basicUserId (avoid conflicts)
+    await IgAccount.deleteMany({ basicUserId: String(user_id) });
+    console.log(`Deleted old IG connections for basicUserId ${user_id}`);
+
+    // Create fresh mapping appUserId <-> basicUserId + token
+    const newIgAccount = await IgAccount.create({
+      appUserId: req.appUserId,
+      basicUserId: String(user_id),
+      accessToken: String(access_token)
+    });
+    console.log(`Created new IG account mapping for app user ${req.appUserId}`);
 
     return res.json({ ok: true, basicUserId: String(user_id) });
   } catch (e) {
