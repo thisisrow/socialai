@@ -5,7 +5,7 @@ import "./App.css";
 import "./index.css";
 
 const APP_ID = "1251511386469731";
-const REDIRECT_URI = "https://socialai-theta.vercel.app/";
+const REDIRECT_URI = "https://757444bf5ddc.ngrok-free.app/";
 const API_BASE = "https://server.palgharcity48.com";
 
 const scopes = [
