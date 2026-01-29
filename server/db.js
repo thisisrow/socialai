@@ -1,3 +1,4 @@
+// db.js (COMPLETE)
 const mongoose = require("mongoose");
 
 function log(...args) {
@@ -22,16 +23,9 @@ const IgAccountSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-
-    // For Basic Display reads (optional)
     basicUserId: { type: String, default: null },
-
-    // For Business/Creator webhook mapping (required for auto replies)
     igBusinessId: { type: String, default: null },
-
-    // MUST be a Page/IG Graph token for comment replies
     accessToken: { type: String, required: true },
-
     tokenType: { type: String, default: null },
     tokenExpiresAt: { type: Date, default: null },
   },
