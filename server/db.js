@@ -1,4 +1,4 @@
-// db.js
+// db.js (complete file)
 const mongoose = require("mongoose");
 
 function log(...args) {
@@ -26,6 +26,8 @@ const IgAccountSchema = new mongoose.Schema(
     basicUserId: { type: String, default: null },
     igBusinessId: { type: String, default: null },
     accessToken: { type: String, required: true },
+    tokenType: { type: String, default: null },
+    tokenExpiresAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
