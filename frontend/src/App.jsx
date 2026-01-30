@@ -6,7 +6,7 @@ import "./index.css";
 
 const APP_ID = "1251511386469731";
 const REDIRECT_URI = "https://socialai-theta.vercel.app/";
-const API_BASE = "https://6eac75832507.ngrok-free.app";
+const API_BASE = "https://40ee0a2243dd.ngrok-free.app";
 
 const scopes = [
   "instagram_business_basic",
