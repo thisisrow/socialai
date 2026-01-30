@@ -1,4 +1,4 @@
-// db.js (COMPLETE)
+// db.js
 const mongoose = require("mongoose");
 
 function log(...args) {
@@ -32,10 +32,22 @@ const IgAccountSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// indexes ONLY here (avoid duplicate warning)
 IgAccountSchema.index({ basicUserId: 1 }, { unique: true, sparse: true });
 IgAccountSchema.index({ igBusinessId: 1 }, { unique: true, sparse: true });
 
 const IgAccount = mongoose.model("IgAccount", IgAccountSchema);
+
+const MediaOwnerSchema = new mongoose.Schema(
+  {
+    postId: { type: String, required: true, unique: true, index: true },
+    appUserId: { type: mongoose.Schema.Types.ObjectId, ref: "AppUser", required: true, index: true },
+    basicUserId: { type: String, default: null, index: true },
+    igBusinessId: { type: String, default: null, index: true },
+  },
+  { timestamps: true }
+);
+const MediaOwner = mongoose.model("MediaOwner", MediaOwnerSchema);
 
 const ContextSchema = new mongoose.Schema(
   {
@@ -82,6 +94,7 @@ module.exports = {
   connectMongo,
   AppUser,
   IgAccount,
+  MediaOwner,
   Context,
   Replied,
   PostState,
