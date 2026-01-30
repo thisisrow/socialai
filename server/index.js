@@ -1,20 +1,33 @@
-// index.js (COMPLETE)
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config();
 
-const { connectMongo, AppUser, IgAccount, Context, Replied, PostState } = require("./db");
+const {
+  connectMongo,
+  AppUser,
+  IgAccount,
+  MediaOwner,
+  Context,
+  Replied,
+  PostState,
+} = require("./db");
 
 const app = express();
 app.use(express.json());
 
+// CORS: allow your Vercel domain
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:3000", "https://socialai-theta.vercel.app"],
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "https://socialai-theta.vercel.app",
+    ],
     credentials: false,
   })
 );
@@ -25,10 +38,17 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-app.get("/", (req, res) => res.send("Rumo Server is running."));
-
+console.log("Global constants initialized");
+app.get("/", (req, res) => {
+  res.send("Rumo Server is running.");
+})
 function must(v, name) {
-  if (!v) throw new Error(`Missing ${name}`);
+  // console.log(`Checking requirement for: ${name}`);
+  if (!v) {
+    console.error(`Requirement failed: Missing ${name}`);
+    throw new Error(`Missing ${name}`);
+  }
+  // console.log(`Requirement met for: ${name}`);
   return v;
 }
 
@@ -58,78 +78,110 @@ function isDuplicateKeyError(e) {
 }
 
 function signToken(user) {
-  return jwt.sign({ sub: String(user._id), email: user.email }, must(JWT_SECRET, "JWT_SECRET"), { expiresIn: "30d" });
+  console.log(`Signing token for user: ${user._id}`);
+  const token = jwt.sign(
+    { sub: String(user._id), email: user.email },
+    must(JWT_SECRET, "JWT_SECRET"),
+    { expiresIn: "30d" }
+  );
+  console.log("Token signed successfully.");
+  return token;
 }
 
 function authMiddleware(req, res, next) {
-  console.log("[AUTH] middleware triggered");
+  console.log("Auth middleware triggered.");
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : "";
-  if (!token) return res.status(401).json({ error: "Missing Authorization Bearer token" });
-
+  if (!token) {
+    console.log("Auth failed: Missing Authorization Bearer token.");
+    return res.status(401).json({ error: "Missing Authorization Bearer token" });
+  }
   try {
     const payload = jwt.verify(token, must(JWT_SECRET, "JWT_SECRET"));
     req.appUserId = payload.sub;
-    console.log("[AUTH] success appUserId:", req.appUserId);
+    console.log(`Auth success. User ID: ${req.appUserId}`);
     next();
-  } catch (e) {
-    console.error("[AUTH] invalid token:", e.message);
+  } catch(e) {
+    console.error("Auth failed: Invalid token.", e.message);
     return res.status(401).json({ error: "Invalid token" });
   }
 }
 
-function safeJson(obj, maxLen = 2000) {
-  try {
-    const s = JSON.stringify(obj);
-    return s.length > maxLen ? s.slice(0, maxLen) + "..." : s;
-  } catch {
-    return "[unserializable]";
-  }
-}
-
-// AUTH
+// ---------- AUTH ----------
 app.post("/api/auth/signup", async (req, res) => {
+  console.log("POST /api/auth/signup called.");
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: "email and password required" });
-    if (String(password).length < 6) return res.status(400).json({ error: "password must be 6+ characters" });
+     console.log(`Signup attempt for email: ${email}`);
+    if (!email || !password) {
+      console.log("Signup failed: email or password missing.");
+      return res.status(400).json({ error: "email and password required" });
+    }
+    if (String(password).length < 6) {
+      console.log("Signup failed: password too short.");
+      return res.status(400).json({ error: "password must be 6+ characters" });
+    }
 
     const existing = await AppUser.findOne({ email: String(email).toLowerCase() }).lean();
-    if (existing) return res.status(409).json({ error: "email already registered" });
+    if (existing) {
+      console.log("Signup failed: email already registered.");
+      return res.status(409).json({ error: "email already registered" });
+    }
 
+    console.log("Hashing password...");
     const passwordHash = await bcrypt.hash(String(password), 10);
     const user = await AppUser.create({ email: String(email).toLowerCase(), passwordHash });
+    console.log(`User created with ID: ${user._id}`);
 
     const token = signToken(user);
     return res.json({ ok: true, token, user: { id: String(user._id), email: user.email } });
   } catch (e) {
+    console.error("Signup error:", e.message);
     return res.status(500).json({ error: e.message });
   }
 });
 
 app.post("/api/auth/login", async (req, res) => {
+  console.log("POST /api/auth/login called.");
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: "email and password required" });
+    console.log(`Login attempt for email: ${email}`);
+    if (!email || !password) {
+      console.log("Login failed: email or password missing.");
+      return res.status(400).json({ error: "email and password required" });
+    }
 
     const user = await AppUser.findOne({ email: String(email).toLowerCase() });
-    if (!user) return res.status(401).json({ error: "invalid credentials" });
+    if (!user) {
+      console.log("Login failed: invalid credentials (user not found).");
+      return res.status(401).json({ error: "invalid credentials" });
+    }
 
+    console.log("Comparing password...");
     const ok = await bcrypt.compare(String(password), user.passwordHash);
-    if (!ok) return res.status(401).json({ error: "invalid credentials" });
+    if (!ok) {
+      console.log("Login failed: invalid credentials (password mismatch).");
+      return res.status(401).json({ error: "invalid credentials" });
+    }
 
+    console.log("Login successful.");
     const token = signToken(user);
     return res.json({ ok: true, token, user: { id: String(user._id), email: user.email } });
   } catch (e) {
+    console.error("Login error:", e.message);
     return res.status(500).json({ error: e.message });
   }
 });
 
 app.get("/api/me", authMiddleware, async (req, res) => {
+  console.log(`GET /api/me called for user: ${req.appUserId}`);
   const user = await AppUser.findById(req.appUserId).lean();
-  if (!user) return res.status(404).json({ error: "user not found" });
-
+  if (!user) {
+    console.log("GET /api/me: user not found.");
+    return res.status(404).json({ error: "user not found" });
+  }
   const ig = await IgAccount.findOne({ appUserId: user._id }).lean();
+  console.log(`GET /api/me: Found user. Instagram connected: ${!!ig}`);
   return res.json({
     ok: true,
     user: { id: String(user._id), email: user.email },
@@ -141,7 +193,7 @@ app.get("/api/me", authMiddleware, async (req, res) => {
 
 // Save IG business id manually (helps webhook mapping)
 app.post("/api/instagram-business-id", authMiddleware, async (req, res) => {
-  console.log("[IG-BIZ] called by appUserId:", req.appUserId);
+  console.log(`POST /api/instagram-business-id called for user: ${req.appUserId}`);
   try {
     const { igBusinessId } = req.body || {};
     must(igBusinessId, "igBusinessId");
@@ -153,26 +205,23 @@ app.post("/api/instagram-business-id", authMiddleware, async (req, res) => {
     ).lean();
 
     if (!updated) return res.status(400).json({ error: "Instagram not connected yet" });
-
-    console.log("[IG-BIZ] saved igBusinessId:", updated.igBusinessId);
     return res.json({ ok: true, igBusinessId: updated.igBusinessId });
   } catch (e) {
-    console.error("[IG-BIZ] error:", e.message);
     return res.status(500).json({ error: e.message });
   }
 });
 
-// Instagram OAuth exchange (race-safe + idempotent)
+// ---------- Instagram OAuth exchange ----------
 app.post("/api/instagram-token", authMiddleware, async (req, res) => {
-  console.log("[IG-TOKEN] called by appUserId:", req.appUserId);
+  console.log(`POST /api/instagram-token called for user: ${req.appUserId}`);
   try {
     const { client_id, redirect_uri, code } = req.body || {};
+    console.log("Requesting Instagram access token with code.");
     must(client_id, "client_id");
     must(redirect_uri, "redirect_uri");
     must(code, "code");
     must(process.env.INSTAGRAM_CLIENT_SECRET, "INSTAGRAM_CLIENT_SECRET");
 
-    console.log("[IG-TOKEN] exchanging code for short-lived token...");
     const form = new URLSearchParams();
     form.append("client_id", String(client_id));
     form.append("client_secret", String(process.env.INSTAGRAM_CLIENT_SECRET));
@@ -180,123 +229,139 @@ app.post("/api/instagram-token", authMiddleware, async (req, res) => {
     form.append("redirect_uri", String(redirect_uri));
     form.append("code", String(code));
 
-    const tokenResp = await axios.post("https://api.instagram.com/oauth/access_token", form, {
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      timeout: 20000,
-    });
+    const tokenResp = await axios.post(
+      "https://api.instagram.com/oauth/access_token",
+      form,
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
+    );
 
     const { access_token: shortLivedToken, user_id } = tokenResp.data || {};
-    if (!shortLivedToken || !user_id) return res.status(500).json({ error: "Instagram token response missing fields" });
+    if (!shortLivedToken || !user_id) {
+       console.error("Instagram token response missing fields.");
+       return res.status(500).json({ error: "Instagram token response missing fields" });
+    }
+    console.log(`Received IG User ID: ${user_id}. Exchanging for long-lived token.`);
+    console.log(`Received short-lived token: ${redactToken(shortLivedToken)}`);
 
-    console.log("[IG-TOKEN] received basic user_id:", String(user_id));
-    console.log("[IG-TOKEN] short-lived token:", redactToken(shortLivedToken));
-
-    console.log("[IG-TOKEN] exchanging for long-lived token...");
     const longResp = await axios.get("https://graph.instagram.com/access_token", {
       params: {
         grant_type: "ig_exchange_token",
         client_secret: String(process.env.INSTAGRAM_CLIENT_SECRET),
         access_token: String(shortLivedToken),
       },
-      timeout: 20000,
     });
 
     const { access_token: accessToken, token_type: tokenType, expires_in: expiresInSec } = longResp.data || {};
-    if (!accessToken) return res.status(500).json({ error: "Instagram long-lived token response missing access_token" });
+    if (!accessToken) {
+      console.error("Instagram long-lived token response missing access_token.");
+      return res.status(500).json({ error: "Instagram long-lived token response missing access_token" });
+    }
+    console.log(`Received long-lived token: ${redactToken(accessToken)}. Saving to DB.`);
 
-    console.log("[IG-TOKEN] long-lived token:", redactToken(accessToken));
-
+    // Save mapping appUserId <-> basicUserId + token
     const tokenExpiresAt =
       typeof expiresInSec === "number" && Number.isFinite(expiresInSec) && expiresInSec > 0
         ? new Date(Date.now() + expiresInSec * 1000)
         : null;
 
-    const updateDoc = {
-      $setOnInsert: { appUserId: req.appUserId }, // important for insert
-      $set: {
-        basicUserId: String(user_id),
-        accessToken: String(accessToken),
-        tokenType: tokenType ? String(tokenType) : null,
-        tokenExpiresAt,
+    await IgAccount.findOneAndUpdate(
+      { appUserId: req.appUserId },
+      {
+        $set: {
+          basicUserId: String(user_id),
+          accessToken: String(accessToken),
+          tokenType: tokenType ? String(tokenType) : null,
+          tokenExpiresAt,
+        },
       },
-    };
+      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
+    );
+    console.log(`Saved mapping for app user ${req.appUserId}`);
 
-    try {
-      await IgAccount.findOneAndUpdate({ appUserId: req.appUserId }, updateDoc, {
-        upsert: true,
-        new: true,
-        runValidators: true,
-        setDefaultsOnInsert: true,
-      });
-    } catch (e) {
-      if (!isDuplicateKeyError(e)) throw e;
-
-      console.warn("[IG-TOKEN] duplicate key race detected, updating existing doc...");
-      await IgAccount.updateOne(
-        { appUserId: req.appUserId },
-        {
-          $set: {
-            basicUserId: String(user_id),
-            accessToken: String(accessToken),
-            tokenType: tokenType ? String(tokenType) : null,
-            tokenExpiresAt,
-          },
-        }
-      );
-    }
-
-    console.log("[IG-TOKEN] saved token mapping for appUserId:", req.appUserId);
     return res.json({ ok: true, basicUserId: String(user_id) });
   } catch (e) {
     const msg = extractErrorMessage(e);
-    console.error("[IG-TOKEN] error:", e?.response?.status, e?.response?.data || e.message);
+    console.error("Instagram token exchange error:", e?.response?.data || e.message);
 
-    if (isDuplicateKeyError(e)) return res.status(409).json({ error: msg || "Instagram already linked" });
-
+    if (isDuplicateKeyError(e)) {
+      return res.status(409).json({ error: msg || "Instagram account already linked" });
+    }
     const status = e?.response?.status;
-    if (typeof status === "number" && status >= 400 && status < 600) return res.status(status).json({ error: msg });
-
+    if (typeof status === "number" && status >= 400 && status < 600) {
+      return res.status(status).json({ error: msg || `HTTP ${status}` });
+    }
     return res.status(500).json({ error: msg || "Instagram token exchange failed" });
   }
 });
 
-// POSTS
+// ---------- POSTS ----------
 app.post("/posts", authMiddleware, async (req, res) => {
-  console.log("[POSTS] called by appUserId:", req.appUserId);
+  console.log(`POST /posts called for user: ${req.appUserId}`);
   try {
     const ig = await IgAccount.findOne({ appUserId: req.appUserId }).lean();
-    if (!ig) return res.status(400).json({ error: "Instagram not connected" });
-    if (!ig.accessToken || !ig.basicUserId) return res.status(400).json({ error: "Instagram token missing. Reconnect." });
+    if (!ig) {
+      console.log("Fetch posts failed: Instagram not connected.");
+      return res.status(400).json({ error: "Instagram not connected" });
+    }
 
     const access_token = ig.accessToken;
     const user_id = ig.basicUserId;
-
-    console.log("[POSTS] fetching media for basicUserId:", user_id);
+    console.log(`Fetching posts for IG User ID: ${user_id}`);
 
     const mediaResp = await axios.get(`https://graph.instagram.com/${user_id}/media`, {
-      params: { access_token, fields: "id,caption,media_type,media_url,permalink,timestamp", limit: 12 },
-      timeout: 20000,
+      params: {
+        access_token,
+        fields: "id,caption,media_type,media_url,permalink,timestamp",
+        limit: 12,
+      },
     });
 
     const mediaList = mediaResp.data?.data || [];
-    console.log("[POSTS] media count:", mediaList.length);
+    console.log(`Found ${mediaList.length} media items.`);
+
+    // Persist a global mapping from IG media id -> app user, so webhook can route events correctly.
+    try {
+      if (mediaList.length) {
+        const appUserObjectId = new mongoose.Types.ObjectId(String(req.appUserId));
+        await MediaOwner.bulkWrite(
+          mediaList.map((m) => ({
+            updateOne: {
+              filter: { postId: String(m.id) },
+              update: {
+                $set: {
+                  postId: String(m.id),
+                  appUserId: appUserObjectId,
+                  basicUserId: user_id ? String(user_id) : null,
+                },
+              },
+              upsert: true,
+            },
+          })),
+          { ordered: false }
+        );
+      }
+    } catch (e) {
+      console.error("Failed to persist MediaOwner mapping:", e?.message || e);
+    }
 
     const posts = [];
     for (const m of mediaList) {
       let comments = [];
       try {
+        console.log(`Fetching comments for media: ${m.id}`);
         const cResp = await axios.get(`https://graph.instagram.com/${m.id}/comments`, {
           params: { access_token, fields: "id,text,username,timestamp", limit: 10 },
-          timeout: 20000,
         });
         comments = cResp.data?.data || [];
-      } catch (e) {
-        console.error("[POSTS] comments fetch failed for media:", m.id, e?.response?.data || e.message);
+         console.log(`Found ${comments.length} comments.`);
+      } catch(e) {
+        console.error(`Failed to fetch comments for media ${m.id}:`, e.message);
         comments = [];
       }
       posts.push({ ...m, comments });
     }
 
+    console.log("Fetching context and post states from DB.");
     const [ctxDocs, stDocs] = await Promise.all([
       Context.find({ appUserId: req.appUserId }).lean(),
       PostState.find({ appUserId: req.appUserId }).lean(),
@@ -304,81 +369,106 @@ app.post("/posts", authMiddleware, async (req, res) => {
 
     const contextMap = {};
     for (const d of ctxDocs) contextMap[d.postId] = d.text;
+    console.log(`Loaded ${Object.keys(contextMap).length} context items.`);
 
     const stateMap = {};
     for (const s of stDocs) stateMap[s.postId] = { autoReplyEnabled: !!s.autoReplyEnabled, sinceMs: s.sinceMs ?? null };
+    console.log(`Loaded ${Object.keys(stateMap).length} state items.`);
 
     return res.json({ ok: true, posts, contextMap, stateMap });
   } catch (e) {
     const msg = extractErrorMessage(e);
     const data = e?.response?.data;
+    console.error("Fetch posts error:", data || e.message);
 
-    console.error("[POSTS] error:", e?.response?.status, data || e.message);
-
+    // IG token expired (OAuthException code 190)
     const igCode = data?.code ?? data?.error?.code;
-    if (igCode === 190) return res.status(401).json({ error: msg || "Instagram access token expired. Reconnect." });
-
+    if (igCode === 190) {
+      return res.status(401).json({ error: msg || "Instagram access token expired. Reconnect Instagram." });
+    }
     const status = e?.response?.status;
-    if (typeof status === "number" && status >= 400 && status < 600) return res.status(status).json({ error: msg });
-
+    if (typeof status === "number" && status >= 400 && status < 600) {
+      return res.status(status).json({ error: msg || `HTTP ${status}` });
+    }
     return res.status(500).json({ error: msg || "Failed to fetch posts" });
   }
 });
 
-// CONTEXT
+// ---------- CONTEXT ----------
 app.get("/api/context", authMiddleware, async (req, res) => {
+  console.log(`GET /api/context called for user: ${req.appUserId}`);
   const docs = await Context.find({ appUserId: req.appUserId }).lean();
   const contextMap = {};
   for (const d of docs) contextMap[d.postId] = d.text;
+  console.log(`Returning ${Object.keys(contextMap).length} context items.`);
   return res.json({ ok: true, contextMap });
 });
 
 app.put("/api/context", authMiddleware, async (req, res) => {
+  console.log(`PUT /api/context called for user: ${req.appUserId}`);
   const { postId, text } = req.body || {};
-  if (!postId || !text) return res.status(400).json({ error: "postId and text required" });
+  if (!postId || !text) {
+    console.log("Update context failed: postId or text missing.");
+    return res.status(400).json({ error: "postId and text required" });
+  }
+  console.log(`Updating context for post: ${postId}`);
 
   const doc = await Context.findOneAndUpdate(
     { appUserId: req.appUserId, postId: String(postId) },
     { $set: { text: String(text) } },
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
   );
+  console.log("Context updated successfully.");
 
   return res.json({ ok: true, context: { postId: doc.postId, text: doc.text } });
 });
 
 app.delete("/api/context", authMiddleware, async (req, res) => {
+  console.log(`DELETE /api/context called for user: ${req.appUserId}`);
   const { postId } = req.body || {};
-  if (!postId) return res.status(400).json({ error: "postId required" });
+  if (!postId) {
+    console.log("Delete context failed: postId missing.");
+    return res.status(400).json({ error: "postId required" });
+  }
+  console.log(`Deleting context for post: ${postId}`);
 
   await Context.deleteOne({ appUserId: req.appUserId, postId: String(postId) });
+  console.log("Context deleted successfully.");
   return res.json({ ok: true });
 });
 
-// POST STATE
+// ---------- POST STATE ----------
 app.get("/api/post-state", authMiddleware, async (req, res) => {
+  console.log(`GET /api/post-state called for user: ${req.appUserId}`);
   const docs = await PostState.find({ appUserId: req.appUserId }).lean();
   const stateMap = {};
   for (const s of docs) stateMap[s.postId] = { autoReplyEnabled: !!s.autoReplyEnabled, sinceMs: s.sinceMs ?? null };
+  console.log(`Returning ${Object.keys(stateMap).length} post state items.`);
   return res.json({ ok: true, stateMap });
 });
 
 app.put("/api/post-state", authMiddleware, async (req, res) => {
+  console.log(`PUT /api/post-state called for user: ${req.appUserId}`);
   const { postId, enabled } = req.body || {};
-  if (!postId || typeof enabled !== "boolean")
+  if (!postId || typeof enabled !== "boolean") {
+    console.log("Update post state failed: postId or enabled missing/invalid.");
     return res.status(400).json({ error: "postId and enabled(boolean) required" });
+  }
+  console.log(`Updating post state for post ${postId} to ${enabled}.`);
 
   const doc = await PostState.findOneAndUpdate(
     { appUserId: req.appUserId, postId: String(postId) },
     { $set: { autoReplyEnabled: enabled, sinceMs: enabled ? Date.now() : null } },
     { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
   );
+  console.log("Post state updated successfully.");
 
   return res.json({ ok: true, state: { autoReplyEnabled: !!doc.autoReplyEnabled, sinceMs: doc.sinceMs ?? null } });
 });
 
-// AI reply helpers
+// ---------- AI Reply helpers ----------
 async function generateReply(comment, context) {
-  console.log("[AI] generating reply...");
+  console.log("Generating AI reply...");
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = `
@@ -392,193 +482,229 @@ Rules:
 `;
     const result = await model.generateContent(prompt);
     const replyText = result.response.text().trim();
-    console.log("[AI] reply:", replyText);
+    console.log(`Generated reply: "${replyText}"`);
     return replyText;
-  } catch (e) {
-    console.error("[AI] failed:", e.message);
+  } catch(e) {
+    console.error("AI reply generation failed:", e.message);
     return "Thank you for reaching out! 😊";
   }
 }
 
-// ONLY Instagram endpoint (Facebook endpoint removed)
 async function replyToComment({ commentId, message, accessToken }) {
-  const url = `https://graph.instagram.com/${commentId}/replies`;
-
-  console.log("[REPLY] will send reply");
-  console.log("[REPLY] commentId:", commentId);
-  console.log("[REPLY] message:", String(message || "").slice(0, 300));
-  console.log("[REPLY] token:", redactToken(accessToken));
-  console.log("[REPLY] POST:", url);
-
+  console.log(`Replying to comment: ${commentId}`);
+  console.log(`Using access token: ${redactToken(accessToken)}`);
+  const fbGraphVersion = process.env.FB_GRAPH_VERSION || "v19.0";
+  const urls = [
+    `https://graph.facebook.com/${fbGraphVersion}/${commentId}/replies`,
+    `https://graph.instagram.com/${commentId}/replies`,
+  ];
   try {
-    const resp = await axios.post(
-      url,
-      null,
-      {
-        params: {
-          message: String(message || ""),
-          access_token: String(accessToken),
-        },
-        timeout: 20000,
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        console.log(`POST ${url} message="${String(message || "").slice(0, 200)}"`);
+        await axios.post(url, null, { params: { message, access_token: accessToken } });
+        console.log("Successfully posted reply to Instagram.");
+        return;
+      } catch (e) {
+        lastErr = e;
+        console.error("Reply attempt failed:", url, e?.response?.data || e.message);
       }
-    );
-    console.log("[REPLY] success:", safeJson(resp?.data));
-    return resp?.data;
+    }
+    throw lastErr || new Error("All reply attempts failed");
   } catch (e) {
-    console.error("[REPLY] failed:", e?.response?.status, e?.response?.data || e.message);
-    throw e;
+    console.error("Failed to post reply to Instagram:", e?.response?.data || e.message);
+    throw e; // re-throw to be caught by webhook handler
   }
 }
 
 function extractPostId(commentData) {
-  return (
+  const postId =
     commentData?.media?.id ||
     commentData?.media_id ||
     commentData?.post_id ||
     commentData?.mediaId ||
     commentData?.object_id ||
-    null
-  );
+    null;
+  // console.log(`Extracted Post ID: ${postId}`);
+  return postId;
 }
 
-// WEBHOOK VERIFY
+// ---------- WEBHOOK VERIFY ----------
 app.get("/api/instagram-webhook", (req, res) => {
-  console.log("[WEBHOOK-VERIFY] query:", safeJson(req.query));
+  console.log("GET /api/instagram-webhook (verification) called.");
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
-    console.log("[WEBHOOK-VERIFY] ok");
+    console.log("Webhook verification successful.");
     return res.status(200).send(req.query["hub.challenge"]);
   }
-  console.log("[WEBHOOK-VERIFY] not verification");
+  console.log("Webhook received, but not a verification request.");
   return res.status(200).send("Webhook active");
 });
 
-// WEBHOOK RECEIVE (with logs: incoming comment + reply sending)
+// ---------- WEBHOOK RECEIVE ----------
 app.post("/api/instagram-webhook", async (req, res) => {
-  res.sendStatus(200);
+  // console.log("POST /api/instagram-webhook called.");
+  res.sendStatus(200); // Respond immediately
 
   const body = req.body;
-  console.log("[WEBHOOK] raw:", safeJson(body, 2500));
-
   if (body?.object !== "instagram") {
-    console.log("[WEBHOOK] skip: not instagram object");
+    // console.log("Webhook received, but not from Instagram. Skipping.");
     return;
   }
+  
+  console.log("Processing Instagram webhook notification...");
+  // console.dir(body, { depth: 5 });
+
 
   try {
     for (const entry of body.entry || []) {
       const igBusinessId = String(entry.id || "");
-      console.log("[WEBHOOK] entry igBusinessId:", igBusinessId);
+      if (!igBusinessId) {
+        console.log("Skipping entry, no IG Business ID found.");
+        continue;
+      }
+      console.log(`Processing entry for IG Business ID: ${igBusinessId}`);
 
       for (const change of entry.changes || []) {
-        console.log("[WEBHOOK] change.field:", change.field);
         if (change.field !== "comments") continue;
+        console.log("Processing 'comments' field change.");
 
         const commentData = change.value || {};
         const commentId = String(commentData.id || "");
         const parentId = commentData.parent_id ? String(commentData.parent_id) : "";
         const commenterId = String(commentData.from?.id || "");
-        const commenterUsername = String(commentData.from?.username || "");
         const postId = String(extractPostId(commentData) || "");
-        const incomingText = String(commentData.text || "");
 
-        console.log("[WEBHOOK] incoming comment:");
-        console.log("[WEBHOOK] commentId:", commentId);
-        console.log("[WEBHOOK] postId:", postId);
-        console.log("[WEBHOOK] parentId:", parentId);
-        console.log("[WEBHOOK] commenterId:", commenterId);
-        console.log("[WEBHOOK] username:", commenterUsername);
-        console.log("[WEBHOOK] text:", incomingText);
+        console.log(
+          `Comment Data: commentId=${commentId}, postId=${postId}, parentId=${parentId}, commenterId=${commenterId}`
+        );
 
         if (!commentId || !postId) {
-          console.log("[WEBHOOK] skip: missing commentId/postId");
+          console.log("Skipping: Missing commentId or postId.");
           continue;
         }
         if (parentId) {
-          console.log("[WEBHOOK] skip: this is a reply thread (parent_id exists)");
+          console.log("Skipping: Is a reply to another comment (has parentId).");
           continue;
         }
         if (commenterId && commenterId === igBusinessId) {
-          console.log("[WEBHOOK] skip: comment from page owner");
+          console.log("Skipping: Comment is from the page owner (avoiding loop).");
           continue;
         }
 
-        // Find owner IgAccount mapping
+        // Resolve which app user owns this webhook event.
         let ig = await IgAccount.findOne({ igBusinessId }).lean();
-        if (!ig) ig = await IgAccount.findOne({ basicUserId: igBusinessId }).lean();
+        if (!ig) {
+          // Some setups only store the Basic Display user id; try that too.
+          ig = await IgAccount.findOne({ basicUserId: igBusinessId }).lean();
+        }
 
         if (!ig) {
-          console.log("[WEBHOOK] no direct IgAccount match. inferring via postId...");
-          const stateAny = await PostState.findOne({ postId: String(postId) }).lean();
-          const ctxAny = stateAny ? null : await Context.findOne({ postId: String(postId) }).lean();
-          const inferredAppUserId = stateAny?.appUserId || ctxAny?.appUserId || null;
-
-          console.log("[WEBHOOK] inferredAppUserId:", inferredAppUserId ? String(inferredAppUserId) : null);
-
-          if (inferredAppUserId) {
-            ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+          // Prefer the global media id -> app user mapping captured during /posts.
+          const owner = await MediaOwner.findOne({ postId: String(postId) }).lean();
+          if (owner?.appUserId) {
+            console.log(`Resolved owner via MediaOwner postId=${postId}: ${String(owner.appUserId)}`);
+            ig = await IgAccount.findOne({ appUserId: owner.appUserId }).lean();
 
             if (ig?.appUserId && !ig.igBusinessId) {
-              console.log("[WEBHOOK] binding igBusinessId to appUserId:", String(ig.appUserId));
-              await IgAccount.updateOne({ appUserId: ig.appUserId }, { igBusinessId });
-              ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+              console.log(`Binding igBusinessId=${igBusinessId} to appUserId=${String(ig.appUserId)} (via MediaOwner)`);
+              try {
+                await IgAccount.updateOne({ appUserId: ig.appUserId }, { $set: { igBusinessId } });
+                ig = await IgAccount.findOne({ appUserId: owner.appUserId }).lean();
+              } catch (e) {
+                console.error("Failed to bind igBusinessId to IgAccount:", e?.message || e);
+              }
+            }
+
+            if (!owner.igBusinessId) {
+              try {
+                await MediaOwner.updateOne({ postId: String(postId) }, { $set: { igBusinessId } });
+              } catch (e) {
+                console.error("Failed to bind igBusinessId to MediaOwner:", e?.message || e);
+              }
             }
           }
         }
 
         if (!ig) {
-          console.log("[WEBHOOK] skip: no IgAccount mapping for igBusinessId:", igBusinessId);
+          // Infer ownership by postId (auto-reply state/context saved via UI uses the app user id).
+          const stateAny = await PostState.findOne({ postId: String(postId) }).lean();
+          const ctxAny = stateAny ? null : await Context.findOne({ postId: String(postId) }).lean();
+          const inferredAppUserId = stateAny?.appUserId || ctxAny?.appUserId || null;
+
+          if (inferredAppUserId) {
+            console.log(`Inferred app user via postId=${postId}: ${String(inferredAppUserId)}`);
+            ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+            if (ig?.appUserId && !ig.igBusinessId) {
+              console.log(`Binding igBusinessId=${igBusinessId} to appUserId=${String(ig.appUserId)}`);
+              await IgAccount.updateOne({ appUserId: ig.appUserId }, { $set: { igBusinessId } });
+              ig = await IgAccount.findOne({ appUserId: inferredAppUserId }).lean();
+            } else if (ig?.igBusinessId && ig.igBusinessId !== igBusinessId) {
+              console.log(
+                `Not binding igBusinessId=${igBusinessId}; existing igBusinessId=${ig.igBusinessId} for appUserId=${String(
+                  ig.appUserId
+                )}`
+              );
+            }
+          }
+        }
+
+        if (!ig) {
+          console.log(
+            `Skipping: No IgAccount mapping for igBusinessId=${igBusinessId}. Call /posts once to create MediaOwner mappings, or set it via POST /api/instagram-business-id.`
+          );
           continue;
         }
 
-        console.log("[WEBHOOK] db match:");
-        console.log("[WEBHOOK] appUserId:", String(ig.appUserId));
-        console.log("[WEBHOOK] igBusinessId:", ig.igBusinessId);
-        console.log("[WEBHOOK] basicUserId:", ig.basicUserId);
-        console.log("[WEBHOOK] accessToken:", redactToken(ig.accessToken));
+        console.log("DB match:", {
+          appUserId: String(ig.appUserId),
+          igBusinessId: ig.igBusinessId,
+          basicUserId: ig.basicUserId,
+          accessToken: redactToken(ig.accessToken),
+        });
 
         if (!ig?.accessToken || !ig?.appUserId) {
-          console.log("[WEBHOOK] skip: IgAccount missing accessToken/appUserId");
+          console.log(`Skipping: IgAccount missing accessToken/appUserId for igBusinessId=${igBusinessId}.`);
           continue;
         }
 
         const already = await Replied.findOne({ appUserId: ig.appUserId, commentId }).lean();
         if (already) {
-          console.log("[WEBHOOK] skip: already replied to commentId:", commentId);
+          console.log(`Skipping: Already replied to comment ${commentId}.`);
           continue;
         }
 
         const state = await PostState.findOne({ appUserId: ig.appUserId, postId }).lean();
-        console.log("[WEBHOOK] autoReplyEnabled:", !!state?.autoReplyEnabled);
-
         if (!state?.autoReplyEnabled) {
-          console.log("[WEBHOOK] skip: auto-reply disabled for postId:", postId);
+          console.log(`Skipping: Auto-reply is not enabled for post ${postId}.`);
           continue;
         }
+        console.log(`Auto-reply is enabled for post ${postId}.`);
 
         const ctx = await Context.findOne({ appUserId: ig.appUserId, postId }).lean();
         const contextText = ctx?.text || "We serve delicious food at Rumo Restaurant.";
-        console.log("[WEBHOOK] context length:", contextText.length);
+        console.log(`Using context of length ${contextText.length}`);
 
-        console.log("[WEBHOOK] generating reply...");
-        const reply = await generateReply(incomingText, contextText);
-        console.log("[WEBHOOK] reply text:", reply);
+        const userText = String(commentData.text || "");
+        console.log(`Incoming comment text: "${userText}"`);
+        const reply = await generateReply(userText, contextText);
+        console.log(`Reply text: "${reply}"`);
 
-        console.log("[WEBHOOK] sending reply...");
-        const apiResult = await replyToComment({ commentId, message: reply, accessToken: ig.accessToken });
-        console.log("[WEBHOOK] reply api result:", safeJson(apiResult));
-
+        await replyToComment({ commentId, message: reply, accessToken: ig.accessToken });
         await Replied.create({ appUserId: ig.appUserId, postId, commentId });
-        console.log("[WEBHOOK] saved replied record for commentId:", commentId);
+        console.log(`Successfully processed and replied to comment ${commentId}.`);
       }
     }
   } catch (e) {
-    console.error("[WEBHOOK] error:", e?.response?.status, e?.response?.data || e.message);
-  }
+	    console.error("Webhook error:", e?.response?.data || e.message);
+	  }
 });
 
-// START
+// ---------- START ----------
+console.log("Connecting to MongoDB...");
 connectMongo()
   .then(() => {
+    console.log("MongoDB connected. Starting server...");
     app.listen(port, () => console.log(`Server running on port ${port}`));
   })
   .catch((e) => {
