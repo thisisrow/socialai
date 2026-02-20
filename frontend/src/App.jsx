@@ -78,6 +78,12 @@ export default function App() {
     localStorage.setItem("jwt_token", data.token);
     setJwtToken(data.token);
     setStatus("Signed up");
+    try {
+      await fetchPosts(data.token);
+    } catch (e) {
+      setStatus("Signed up");
+      setError(e.message);
+    }
   };
 
   const login = async () => {
@@ -90,6 +96,12 @@ export default function App() {
     localStorage.setItem("jwt_token", data.token);
     setJwtToken(data.token);
     setStatus("Logged in");
+    try {
+      await fetchPosts(data.token);
+    } catch (e) {
+      setStatus("Logged in");
+      setError(e.message);
+    }
   };
 
   const logout = () => {
@@ -132,16 +144,20 @@ export default function App() {
     setStateMap(st.stateMap || {});
   }, [jwtToken]);
 
-  const fetchPosts = useCallback(async () => {
-    if (!jwtToken) return;
+  const fetchPosts = useCallback(
+    async (tokenOverride) => {
+      const token = tokenOverride || jwtToken;
+      if (!token) return;
     setError("");
     setStatus("Loading posts...");
-    const json = await apiFetch("/posts", { token: jwtToken, method: "POST", body: JSON.stringify({}) });
+    const json = await apiFetch("/posts", { token, method: "POST", body: JSON.stringify({}) });
     setPosts(json.posts || []);
     if (json.contextMap) setContextMap(json.contextMap);
     if (json.stateMap) setStateMap(json.stateMap);
     setStatus("Connected");
-  }, [jwtToken]);
+    },
+    [jwtToken]
+  );
 
   useEffect(() => {
     if (!jwtToken) return;

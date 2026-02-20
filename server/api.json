@@ -1,0 +1,199 @@
+{
+  "name": "socialai-server",
+  "version": "1.0.0",
+  "baseUrl": "http://localhost:3000",
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "format": "Bearer <JWT>"
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/",
+      "authRequired": false,
+      "description": "Health check."
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/signup",
+      "authRequired": false,
+      "description": "Create a new app user.",
+      "requestBody": {
+        "email": "string",
+        "password": "string (min 6 chars)"
+      },
+      "responses": {
+        "200": {
+          "ok": true,
+          "token": "string",
+          "user": { "id": "string", "email": "string" }
+        },
+        "400": { "error": "email and password required | password must be 6+ characters" },
+        "409": { "error": "email already registered" }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "authRequired": false,
+      "description": "Log in an existing user.",
+      "requestBody": {
+        "email": "string",
+        "password": "string"
+      },
+      "responses": {
+        "200": {
+          "ok": true,
+          "token": "string",
+          "user": { "id": "string", "email": "string" }
+        },
+        "400": { "error": "email and password required" },
+        "401": { "error": "invalid credentials" }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "authRequired": true,
+      "description": "Return current user and Instagram connection status.",
+      "responses": {
+        "200": {
+          "ok": true,
+          "user": { "id": "string", "email": "string" },
+          "instagramConnected": "boolean",
+          "basicUserId": "string | null",
+          "igBusinessId": "string | null"
+        },
+        "401": { "error": "Missing Authorization Bearer token | Invalid token" },
+        "404": { "error": "user not found" }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/instagram-business-id",
+      "authRequired": true,
+      "description": "Manually store an Instagram business id for the logged-in user.",
+      "requestBody": {
+        "igBusinessId": "string"
+      },
+      "responses": {
+        "200": { "ok": true, "igBusinessId": "string" },
+        "400": { "error": "Instagram not connected yet" }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/instagram-token",
+      "authRequired": true,
+      "description": "Exchange Instagram OAuth code for long-lived token and save it.",
+      "requestBody": {
+        "client_id": "string",
+        "redirect_uri": "string",
+        "code": "string"
+      },
+      "responses": {
+        "200": { "ok": true, "basicUserId": "string" },
+        "409": { "error": "Instagram account already linked" }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/posts",
+      "authRequired": true,
+      "description": "Fetch recent Instagram posts + comments, plus saved context and auto-reply state.",
+      "responses": {
+        "200": {
+          "ok": true,
+          "posts": "array",
+          "contextMap": "{ [postId]: text }",
+          "stateMap": "{ [postId]: { autoReplyEnabled, sinceMs } }"
+        },
+        "400": { "error": "Instagram not connected" },
+        "401": { "error": "Instagram access token expired. Reconnect Instagram." }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/context",
+      "authRequired": true,
+      "description": "Get per-post context for the current user.",
+      "responses": {
+        "200": { "ok": true, "contextMap": "{ [postId]: text }" }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/context",
+      "authRequired": true,
+      "description": "Upsert context for a post.",
+      "requestBody": {
+        "postId": "string",
+        "text": "string"
+      },
+      "responses": {
+        "200": { "ok": true, "context": { "postId": "string", "text": "string" } },
+        "400": { "error": "postId and text required" }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/context",
+      "authRequired": true,
+      "description": "Delete context for a post.",
+      "requestBody": {
+        "postId": "string"
+      },
+      "responses": {
+        "200": { "ok": true },
+        "400": { "error": "postId required" }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/post-state",
+      "authRequired": true,
+      "description": "Get auto-reply state for posts.",
+      "responses": {
+        "200": { "ok": true, "stateMap": "{ [postId]: { autoReplyEnabled, sinceMs } }" }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/post-state",
+      "authRequired": true,
+      "description": "Enable/disable auto-reply for a post.",
+      "requestBody": {
+        "postId": "string",
+        "enabled": "boolean"
+      },
+      "responses": {
+        "200": { "ok": true, "state": { "autoReplyEnabled": "boolean", "sinceMs": "number | null" } },
+        "400": { "error": "postId and enabled(boolean) required" }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/instagram-webhook",
+      "authRequired": false,
+      "description": "Webhook verification endpoint for Instagram.",
+      "query": {
+        "hub.mode": "subscribe",
+        "hub.verify_token": "string",
+        "hub.challenge": "string"
+      },
+      "responses": {
+        "200": "hub.challenge or 'Webhook active'"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/instagram-webhook",
+      "authRequired": false,
+      "description": "Webhook receiver for Instagram comment notifications. Responds 200 immediately and processes asynchronously.",
+      "responses": {
+        "200": "ok"
+      }
+    }
+  ]
+}
