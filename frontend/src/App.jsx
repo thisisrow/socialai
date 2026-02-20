@@ -1,65 +1,13 @@
 // App.jsx (frontend)
 import { useCallback, useEffect, useMemo, useState } from "react";
-import PropTypes from "prop-types";
 import "./App.css";
-import "./index.css";
-
-const APP_ID = "1251511386469731";
-const REDIRECT_URI = "https://socialai-theta.vercel.app/";
-const API_BASE = "https://9316-103-134-7-130.ngrok-free.app";
-
-const scopes = [
-  "instagram_business_basic",
-  "instagram_business_manage_messages",
-  "instagram_business_manage_comments",
-  "instagram_business_content_publish",
-  "instagram_business_manage_insights",
-];
-
-function Modal({ open, title, children, onClose }) {
-  if (!open) return null;
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>{title}</h3>
-          <button className="ghost-btn small-btn" onClick={onClose} type="button">
-            ✕
-          </button>
-        </div>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-Modal.propTypes = {
-  open: PropTypes.bool.isRequired,
-  title: PropTypes.string.isRequired,
-  children: PropTypes.node.isRequired,
-  onClose: PropTypes.func.isRequired,
-};
-
-
-async function apiFetch(path, { token, ...opts } = {}) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    ...opts,
-    headers: {
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  const ct = r.headers.get("content-type") || "";
-  const payload = ct.includes("application/json") ? await r.json() : await r.text();
-
-  if (!r.ok) {
-    const msg = typeof payload === "string" ? payload : payload?.error || JSON.stringify(payload);
-    throw new Error(msg || `HTTP ${r.status}`);
-  }
-  return payload;
-}
+import AccountSection from "./components/AccountSection";
+import AuthSection from "./components/AuthSection";
+import ContextModal from "./components/ContextModal";
+import PostsSection from "./components/PostsSection";
+import StatusBar from "./components/StatusBar";
+import { IG_APP_ID, IG_REDIRECT_URI, IG_SCOPES } from "./config/env";
+import { apiFetch } from "./lib/api";
 
 export default function App() {
   const [jwtToken, setJwtToken] = useState(localStorage.getItem("jwt_token") || "");
@@ -84,13 +32,13 @@ export default function App() {
   const loginUrl = useMemo(() => {
     const params = new URLSearchParams({
       force_reauth: "true",
-      client_id: APP_ID,
-      redirect_uri: REDIRECT_URI,
+      client_id: IG_APP_ID,
+      redirect_uri: IG_REDIRECT_URI,
       response_type: "code",
-      scope: scopes.join(","),
+      scope: IG_SCOPES.join(","),
     });
     return `https://www.instagram.com/oauth/authorize?${params.toString()}`;
-  }, []);
+  }, [IG_APP_ID, IG_REDIRECT_URI, IG_SCOPES]);
 
   const clearCodeFromUrl = () => {
     const url = new URL(window.location.href);
@@ -163,8 +111,8 @@ export default function App() {
       token: jwtToken,
       method: "POST",
       body: JSON.stringify({
-        client_id: APP_ID,
-        redirect_uri: REDIRECT_URI,
+        client_id: IG_APP_ID,
+        redirect_uri: IG_REDIRECT_URI,
         code: authCode,
       }),
     });
@@ -267,172 +215,79 @@ export default function App() {
     }));
   };
 
+  const handleSignup = () => signup().catch((e) => setError(e.message));
+  const handleLogin = () => login().catch((e) => setError(e.message));
+  const handleSaveInstagram = () => connectInstagram().catch((e) => setError(e.message));
+  const handleLoadPosts = () => fetchPosts().catch((e) => setError(e.message));
+  const handleToggleAutoReply = (postId) => togglePostAutoReply(postId).catch((e) => setError(e.message));
+  const handleSaveContext = () => saveContext().catch((e) => setError(e.message));
+  const handleDeleteContext = () => deleteContext().catch((e) => setError(e.message));
+
   return (
     <main className="page">
-      <header className="header">
-        <h1>SocialAI</h1>
-        <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
-        <div className="header-actions">
-          {jwtToken ? (
-            <button className="ghost-btn" type="button" onClick={logout}>
-              Log out
-            </button>
-          ) : null}
-        </div>
-      </header>
-      <section className="status-bar">
-        {status && <div className="status-chip">{status}</div>}
-        {error && <div className="error-chip">Error: {error}</div>}
-      </section>
-
-      {!jwtToken ? (
-        <section className="token-box">
-          <h2>Sign up / Login</h2>
-          <div className="token-grid">
-            <div>
-              <p className="label">Email</p>
-              <input className="code-block" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <div className="layout">
+        <aside className="sidebar">
+          <header className="header">
+            <div className="header-top">
+              <div>
+                <h1>SocialAI</h1>
+                <p className="subtitle">Login, connect Instagram, set context, enable auto reply.</p>
+              </div>
+              <div className="header-actions">
+                {jwtToken ? (
+                  <button className="ghost-btn" type="button" onClick={logout}>
+                    Log out
+                  </button>
+                ) : null}
+              </div>
             </div>
-            <div>
-              <p className="label">Password</p>
-              <input
-                className="code-block"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+
+            <StatusBar status={status} error={error} />
+
+            {jwtToken ? (
+              <AccountSection
+                authCode={authCode}
+                loginUrl={loginUrl}
+                onConnectInstagram={(url) => window.open(url, "_self")}
+                onSaveConnection={handleSaveInstagram}
+                onLoadPosts={handleLoadPosts}
               />
-            </div>
-          </div>
-          <div className="button-container">
-            <button className="primary-btn" type="button" onClick={() => signup().catch((e) => setError(e.message))}>
-              Sign up
-            </button>
-            <button className="ghost-btn" type="button" onClick={() => login().catch((e) => setError(e.message))}>
-              Login
-            </button>
-          </div>
-        </section>
-      ) : (
-        <>
-          <section className="token-box">
-            <h2>Account</h2>
-            <div className="token-grid">
-              <div>
-                <p className="label">Email</p>
-                <code className="code-block">{me?.user?.email || "..."}</code>
-              </div>
-              <div>
-                <p className="label">Instagram connected</p>
-                <code className="code-block">{me?.instagramConnected ? "Yes" : "No"}</code>
-              </div>
-              <div>
-                <p className="label">Instagram auth code</p>
-                <code className="code-block">{authCode || "Not received"}</code>
-              </div>
-              <div>
-                <p className="label">Basic User ID</p>
-                <code className="code-block">{me?.basicUserId || "—"}</code>
-              </div>
-              <div>
-                <p className="label">Business IG ID (webhook)</p>
-                <code className="code-block">{me?.igBusinessId || "—"}</code>
-              </div>
-            </div>
+            ) : null}
+          </header>
 
-            <div className="button-container">
-              <button className="primary-btn" type="button" onClick={() => window.open(loginUrl, "_self")}>
-                Connect Instagram
-              </button>
-              {authCode && (
-                <button className="ghost-btn" type="button" onClick={() => connectInstagram().catch((e) => setError(e.message))}>
-                  Save Instagram Connection
-                </button>
-              )}
-              <button className="ghost-btn" type="button" onClick={() => fetchPosts().catch((e) => setError(e.message))}>
-                Load posts
-              </button>
-            </div>
-          </section>
-
-          <section className="posts">
-            <h2>Recent posts</h2>
-            {!posts.length && <p className="muted">No posts loaded yet.</p>}
-
-            <div className="media-grid">
-              {posts.map((p) => {
-                const ctx = contextMap?.[p.id] || "";
-                const enabled = Boolean(stateMap?.[p.id]?.autoReplyEnabled);
-
-                return (
-                  <article key={p.id} className="card">
-                    <div className="card-top">
-                      <p className="label">{p.media_type}</p>
-                      <a href={p.permalink} target="_blank" rel="noreferrer">
-                        View on Instagram
-                      </a>
-                    </div>
-
-                    <p className="caption">{p.caption || "No caption"}</p>
-                    <p className="timestamp">{p.timestamp}</p>
-
-                    <div className="card-actions">
-                      <button className="ghost-btn small-btn" type="button" onClick={() => openContextModal(p.id)}>
-                        {ctx ? "Edit context" : "Add context"}
-                      </button>
-
-                      {ctx && <span className="chip">Context saved</span>}
-
-                      <button
-                        type="button"
-                        className={enabled ? "toggle-btn on" : "toggle-btn off"}
-                        onClick={() => togglePostAutoReply(p.id).catch((e) => setError(e.message))}
-                      >
-                        {enabled ? "AI Reply ON" : "AI Reply OFF"}
-                      </button>
-                    </div>
-
-                    <div className="comments">
-                      <p className="label">Comments</p>
-                      {p.comments?.length ? (
-                        <ul>
-                          {p.comments.map((c) => (
-                            <li key={c.id}>
-                              <span className="comment-user">{c.username || "unknown"}</span>: {c.text}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="muted small">No comments found.</p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-
-          <Modal open={contextModalOpen} title="Post context" onClose={closeContextModal}>
-            <p className="muted small">Saved in MongoDB. Used for AI replies on this post.</p>
-
-            <textarea
-              className="context-textarea"
-              rows={7}
-              value={contextDraft}
-              onChange={(e) => setContextDraft(e.target.value)}
-              placeholder="Write context for this post..."
+          {!jwtToken ? (
+            <AuthSection
+              email={email}
+              password={password}
+              onEmailChange={setEmail}
+              onPasswordChange={setPassword}
+              onSignup={handleSignup}
+              onLogin={handleLogin}
             />
+          ) : null}
+        </aside>
 
-            <div className="modal-actions">
-              <button className="primary-btn" type="button" onClick={() => saveContext().catch((e) => setError(e.message))}>
-                Save
-              </button>
-              <button className="danger-btn" type="button" onClick={() => deleteContext().catch((e) => setError(e.message))}>
-                Delete
-              </button>
-            </div>
-          </Modal>
-        </>
-      )}
+        <section className="content">
+          {jwtToken ? (
+            <PostsSection
+              posts={posts}
+              contextMap={contextMap}
+              stateMap={stateMap}
+              onOpenContext={openContextModal}
+              onToggleAutoReply={handleToggleAutoReply}
+            />
+          ) : null}
+        </section>
+      </div>
+
+      <ContextModal
+        open={contextModalOpen}
+        draft={contextDraft}
+        onChange={setContextDraft}
+        onSave={handleSaveContext}
+        onDelete={handleDeleteContext}
+        onClose={closeContextModal}
+      />
     </main>
   );
 }
