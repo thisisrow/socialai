@@ -47,7 +47,7 @@ async function generateReply(comment, context) {
 
   const prompt = buildPrompt(comment, context);
   const primaryModel = env.openrouterModel || "stepfun/step-3.5-flash:free";
-  const fallbackModel = "deepseek/deepseek-r1-0528:free";
+  const fallbackModel = "stepfun/step-3.5-flash:free";
 
   try {
     const { replyText } = await callOpenRouter({
