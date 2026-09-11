@@ -127,8 +127,16 @@ rejection, and webhook-to-tenant routing.
 - Point the Meta webhook at `https://your-api/api/webhook/instagram` with your
   `VERIFY_TOKEN`, and subscribe to the `comments` field.
 - `INSTAGRAM_REDIRECT_URI` must match the Meta app entry character for character.
-- The frontend is a SPA: configure the host to rewrite unknown paths to
-  `index.html`, or `/inbox` will 404 on refresh.
+- The frontend is a SPA. `frontend/vercel.json` handles this on Vercel; any
+  other host needs the equivalent. Three things about that file are load-bearing:
+  - The catch-all rewrite to `/index.html` is what stops `/inbox` returning 404
+    on refresh or a direct link — React Router owns those paths, not the host.
+  - It does **not** swallow `/assets/*`, because Vercel checks the filesystem
+    before applying rewrites.
+  - `vercel.json` is schema-validated with `additionalProperties: false`, so it
+    takes no comment keys — an unknown property fails the build outright.
+  - It lives in `frontend/`, not the repo root, because the Vercel project's
+    Root Directory is `frontend`.
 - Instagram long-lived tokens last 60 days; the server refreshes them
   automatically inside the last 10 days whenever the account is used.
 
