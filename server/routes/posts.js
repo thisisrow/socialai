@@ -1,112 +1,180 @@
 const express = require("express");
-const axios = require("axios");
-const mongoose = require("mongoose");
-const { IgAccount, MediaOwner, Context, PostState } = require("../db");
-const { authMiddleware } = require("../lib/auth");
-const { extractErrorMessage } = require("../lib/errors");
+const { Post, Comment, logActivity } = require("../models");
+const { requireAuth } = require("../middleware/requireAuth");
+const { rateLimit } = require("../middleware/rateLimit");
+const { ApiError, asyncHandler } = require("../lib/errors");
+const { optionalString, requireBoolean, clampInt } = require("../lib/validate");
+const { syncAccount } = require("../services/sync");
 
 const router = express.Router();
 
-// ---------- POSTS ----------
-router.post("/posts", authMiddleware, async (req, res) => {
-  console.log(`POST /posts called for user: ${req.appUserId}`);
-  try {
-    const ig = await IgAccount.findOne({ appUserId: req.appUserId }).lean();
-    if (!ig) {
-      console.log("Fetch posts failed: Instagram not connected.");
-      return res.status(400).json({ error: "Instagram not connected" });
-    }
+router.use(requireAuth);
 
-    const access_token = ig.accessToken;
-    const user_id = ig.basicUserId;
-    console.log(`Fetching posts for IG User ID: ${user_id}`);
+// Syncing hits the Graph API once per post, so keep the hand on the brake.
+const syncLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 6,
+  keyPrefix: "sync",
+  message: "Sync is rate limited. Wait a minute before syncing again.",
+});
 
-    const mediaResp = await axios.get(`https://graph.instagram.com/${user_id}/media`, {
-      params: {
-        access_token,
-        fields: "id,caption,media_type,media_url,permalink,timestamp",
-        limit: 12,
-      },
-    });
+// -------------------------------------------------------------- list ---
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const limit = clampInt(req.query.limit, "limit", { min: 1, max: 100, fallback: 50 });
+    const skip = clampInt(req.query.skip, "skip", { min: 0, max: 100000, fallback: 0 });
+    const search = optionalString(req.query.search, "search", { max: 120 });
 
-    const mediaList = mediaResp.data?.data || [];
-    console.log(`Found ${mediaList.length} media items.`);
+    const query = { userId: req.userId };
+    if (req.query.automation === "on") query.autoReplyEnabled = true;
+    if (req.query.automation === "off") query.autoReplyEnabled = false;
+    if (search) query.caption = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
 
-    // Persist a global mapping from IG media id -> app user, so webhook can route events correctly.
-    try {
-      if (mediaList.length) {
-        const appUserObjectId = new mongoose.Types.ObjectId(String(req.appUserId));
-        await MediaOwner.bulkWrite(
-          mediaList.map((m) => ({
-            updateOne: {
-              filter: { postId: String(m.id) },
-              update: {
-                $set: {
-                  postId: String(m.id),
-                  appUserId: appUserObjectId,
-                  basicUserId: user_id ? String(user_id) : null,
-                },
-              },
-              upsert: true,
-            },
-          })),
-          { ordered: false }
-        );
-      }
-    } catch (e) {
-      console.error("Failed to persist MediaOwner mapping:", e?.message || e);
-    }
-
-    const posts = [];
-    for (const m of mediaList) {
-      let comments = [];
-      try {
-        console.log(`Fetching comments for media: ${m.id}`);
-        const cResp = await axios.get(`https://graph.instagram.com/${m.id}/comments`, {
-          params: { access_token, fields: "id,text,username,timestamp", limit: 10 },
-        });
-        comments = cResp.data?.data || [];
-        console.log(`Found ${comments.length} comments.`);
-      } catch (e) {
-        console.error(`Failed to fetch comments for media ${m.id}:`, e.message);
-        comments = [];
-      }
-      posts.push({ ...m, comments });
-    }
-
-    console.log("Fetching context and post states from DB.");
-    const [ctxDocs, stDocs] = await Promise.all([
-      Context.find({ appUserId: req.appUserId }).lean(),
-      PostState.find({ appUserId: req.appUserId }).lean(),
+    const [posts, total] = await Promise.all([
+      Post.find(query).sort({ postedAt: -1, createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Post.countDocuments(query),
     ]);
 
-    const contextMap = {};
-    for (const d of ctxDocs) contextMap[d.postId] = d.text;
-    console.log(`Loaded ${Object.keys(contextMap).length} context items.`);
+    // One grouped count instead of a query per post.
+    const pendingCounts = await Comment.aggregate([
+      { $match: { userId: req.userId, status: "pending" } },
+      { $group: { _id: "$mediaId", count: { $sum: 1 } } },
+    ]);
+    const pendingByMedia = Object.fromEntries(pendingCounts.map((c) => [c._id, c.count]));
 
-    const stateMap = {};
-    for (const s of stDocs) {
-      stateMap[s.postId] = { autoReplyEnabled: !!s.autoReplyEnabled, sinceMs: s.sinceMs ?? null };
-    }
-    console.log(`Loaded ${Object.keys(stateMap).length} state items.`);
+    res.json({
+      posts: posts.map((p) => ({
+        id: String(p._id),
+        mediaId: p.mediaId,
+        caption: p.caption,
+        mediaType: p.mediaType,
+        mediaUrl: p.mediaUrl,
+        thumbnailUrl: p.thumbnailUrl,
+        permalink: p.permalink,
+        postedAt: p.postedAt,
+        likeCount: p.likeCount,
+        commentsCount: p.commentsCount,
+        autoReplyEnabled: p.autoReplyEnabled,
+        autoReplySince: p.autoReplySince,
+        context: p.context || "",
+        hasContext: Boolean(p.context),
+        repliesSent: p.repliesSent || 0,
+        pendingComments: pendingByMedia[p.mediaId] || 0,
+      })),
+      total,
+      limit,
+      skip,
+    });
+  }),
+);
 
-    return res.json({ ok: true, posts, contextMap, stateMap });
-  } catch (e) {
-    const msg = extractErrorMessage(e);
-    const data = e?.response?.data;
-    console.error("Fetch posts error:", data || e.message);
+// -------------------------------------------------------------- sync ---
+router.post(
+  "/sync",
+  syncLimiter,
+  asyncHandler(async (req, res) => {
+    const result = await syncAccount(req.userId, {
+      mediaLimit: clampInt(req.body?.limit, "limit", { min: 1, max: 50, fallback: 25 }),
+    });
+    res.json(result);
+  }),
+);
 
-    // IG token expired (OAuthException code 190)
-    const igCode = data?.code ?? data?.error?.code;
-    if (igCode === 190) {
-      return res.status(401).json({ error: msg || "Instagram access token expired. Reconnect Instagram." });
-    }
-    const status = e?.response?.status;
-    if (typeof status === "number" && status >= 400 && status < 600) {
-      return res.status(status).json({ error: msg || `HTTP ${status}` });
-    }
-    return res.status(500).json({ error: msg || "Failed to fetch posts" });
-  }
-});
+// ------------------------------------------------------------ single ---
+router.get(
+  "/:mediaId",
+  asyncHandler(async (req, res) => {
+    const post = await Post.findOne({ userId: req.userId, mediaId: String(req.params.mediaId) }).lean();
+    if (!post) throw ApiError.notFound("Post not found", "post_not_found");
+
+    const comments = await Comment.find({ userId: req.userId, mediaId: post.mediaId })
+      .sort({ commentedAt: -1 })
+      .limit(100)
+      .lean();
+
+    res.json({
+      post: { ...post, id: String(post._id) },
+      comments: comments.map((c) => ({ ...c, id: String(c._id) })),
+    });
+  }),
+);
+
+// ----------------------------------------------------------- context ---
+router.put(
+  "/:mediaId/context",
+  asyncHandler(async (req, res) => {
+    const context = optionalString(req.body?.context, "context", { max: 4000 });
+    const post = await Post.findOneAndUpdate(
+      { userId: req.userId, mediaId: String(req.params.mediaId) },
+      { $set: { context } },
+      { returnDocument: "after" },
+    );
+    if (!post) throw ApiError.notFound("Post not found", "post_not_found");
+
+    logActivity(req.userId, "context.updated", context ? "Context saved" : "Context cleared", {
+      mediaId: post.mediaId,
+    });
+    res.json({ mediaId: post.mediaId, context: post.context, hasContext: Boolean(post.context) });
+  }),
+);
+
+// -------------------------------------------------------- automation ---
+router.put(
+  "/:mediaId/automation",
+  asyncHandler(async (req, res) => {
+    const enabled = requireBoolean(req.body?.enabled, "enabled");
+
+    const post = await Post.findOneAndUpdate(
+      { userId: req.userId, mediaId: String(req.params.mediaId) },
+      {
+        $set: {
+          autoReplyEnabled: enabled,
+          // Stamping "now" on enable is the backlog guard: comments that
+          // predate this moment are skipped rather than answered in a burst.
+          autoReplySince: enabled ? new Date() : null,
+        },
+      },
+      { returnDocument: "after" },
+    );
+    if (!post) throw ApiError.notFound("Post not found", "post_not_found");
+
+    logActivity(
+      req.userId,
+      enabled ? "automation.enabled" : "automation.disabled",
+      `Auto-reply ${enabled ? "enabled" : "disabled"}`,
+      { mediaId: post.mediaId },
+    );
+
+    res.json({
+      mediaId: post.mediaId,
+      autoReplyEnabled: post.autoReplyEnabled,
+      autoReplySince: post.autoReplySince,
+    });
+  }),
+);
+
+// --------------------------------------------------- bulk automation ---
+router.post(
+  "/automation/bulk",
+  asyncHandler(async (req, res) => {
+    const enabled = requireBoolean(req.body?.enabled, "enabled");
+    const mediaIds = Array.isArray(req.body?.mediaIds) ? req.body.mediaIds.map(String) : null;
+
+    const filter = { userId: req.userId };
+    if (mediaIds?.length) filter.mediaId = { $in: mediaIds };
+
+    const result = await Post.updateMany(filter, {
+      $set: { autoReplyEnabled: enabled, autoReplySince: enabled ? new Date() : null },
+    });
+
+    logActivity(
+      req.userId,
+      enabled ? "automation.enabled" : "automation.disabled",
+      `Auto-reply ${enabled ? "enabled" : "disabled"} on ${result.modifiedCount} posts`,
+    );
+    res.json({ updated: result.modifiedCount });
+  }),
+);
 
 module.exports = router;

@@ -1,19 +1,21 @@
 {
-  "name": "server",
-  "version": "1.0.0",
-  "description": "",
+  "name": "socialai-server",
+  "version": "2.0.0",
+  "description": "SocialAI API - Instagram comment CRM with Claude-powered auto replies",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon index.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test/smoke.js",
+    "dev:demo": "node test/dev-server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "ISC",
   "dependencies": {
-    "@google/genai": "^1.35.0",
-    "@google/generative-ai": "^0.24.1",
+    "@anthropic-ai/sdk": "^0.72.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
@@ -21,8 +23,10 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.2",
-    "morgan": "^1.10.1",
-    "nodemon": "^3.1.11",
-    "openai": "^6.16.0"
+    "morgan": "^1.10.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.2.0",
+    "nodemon": "^3.1.11"
   }
 }

@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
+  "description": "Standalone sandbox to verify the Claude API key + model work before wiring them into the server.",
   "scripts": {
-    "start": "tsx ai.ts"
+    "start": "tsx ai.ts",
+    "test:key": "tsx ai.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.35.0",
-    "@openrouter/sdk": "^0.8.0",
+    "@anthropic-ai/sdk": "^0.72.0",
     "dotenv": "^17.2.3"
   },
   "devDependencies": {

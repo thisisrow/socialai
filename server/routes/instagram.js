@@ -1,114 +1,155 @@
 const express = require("express");
-const axios = require("axios");
-const { IgAccount } = require("../db");
-const { env, must } = require("../config/env");
-const { authMiddleware } = require("../lib/auth");
-const { extractErrorMessage, isDuplicateKeyError } = require("../lib/errors");
-const { redactToken } = require("../lib/instagram");
+const { IgAccount, Post, Comment, logActivity } = require("../models");
+const { env } = require("../config/env");
+const { requireAuth } = require("../middleware/requireAuth");
+const { ApiError, asyncHandler, extractErrorMessage, isDuplicateKeyError } = require("../lib/errors");
+const { requireString } = require("../lib/validate");
+const ig = require("../lib/instagram");
 
 const router = express.Router();
 
-// Save IG business id manually (helps webhook mapping)
-router.post("/api/instagram-business-id", authMiddleware, async (req, res) => {
-  console.log(`POST /api/instagram-business-id called for user: ${req.appUserId}`);
-  try {
-    const { igBusinessId } = req.body || {};
-    must(igBusinessId, "igBusinessId");
+const IG_SCOPES = [
+  "instagram_business_basic",
+  "instagram_business_manage_comments",
+  "instagram_business_manage_messages",
+  "instagram_business_content_publish",
+  "instagram_business_manage_insights",
+];
 
-    const updated = await IgAccount.findOneAndUpdate(
-      { appUserId: req.appUserId },
-      { $set: { igBusinessId: String(igBusinessId) } },
-      { new: true, runValidators: true }
-    ).lean();
-
-    if (!updated) return res.status(400).json({ error: "Instagram not connected yet" });
-    return res.json({ ok: true, igBusinessId: updated.igBusinessId });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-
-// ---------- Instagram OAuth exchange ----------
-router.post("/api/instagram-token", authMiddleware, async (req, res) => {
-  console.log(`POST /api/instagram-token called for user: ${req.appUserId}`);
-  try {
-    const { client_id, redirect_uri, code } = req.body || {};
-    console.log("Requesting Instagram access token with code.");
-    must(client_id, "client_id");
-    must(redirect_uri, "redirect_uri");
-    must(code, "code");
-    must(env.instagramClientSecret, "INSTAGRAM_CLIENT_SECRET");
-
-    const form = new URLSearchParams();
-    form.append("client_id", String(client_id));
-    form.append("client_secret", String(env.instagramClientSecret));
-    form.append("grant_type", "authorization_code");
-    form.append("redirect_uri", String(redirect_uri));
-    form.append("code", String(code));
-
-    const tokenResp = await axios.post(
-      "https://api.instagram.com/oauth/access_token",
-      form,
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-
-    const { access_token: shortLivedToken, user_id } = tokenResp.data || {};
-    if (!shortLivedToken || !user_id) {
-      console.error("Instagram token response missing fields.");
-      return res.status(500).json({ error: "Instagram token response missing fields" });
+/**
+ * The frontend asks the server for the authorize URL rather than building it
+ * from a VITE_ variable, so the app id and redirect URI live in one place.
+ */
+router.get(
+  "/authorize-url",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!env.instagramAppId) {
+      throw ApiError.badRequest("INSTAGRAM_APP_ID is not configured on the server", "ig_not_configured");
     }
-    console.log(`Received IG User ID: ${user_id}. Exchanging for long-lived token.`);
-    console.log(`Received short-lived token: ${redactToken(shortLivedToken)}`);
+    const redirectUri = req.query.redirectUri
+      ? String(req.query.redirectUri)
+      : env.instagramRedirectUri;
+    if (!redirectUri) {
+      throw ApiError.badRequest(
+        "INSTAGRAM_REDIRECT_URI is not configured on the server",
+        "ig_not_configured",
+      );
+    }
+    res.json({ url: ig.buildAuthorizeUrl({ redirectUri, scopes: IG_SCOPES }), redirectUri });
+  }),
+);
 
-    const longResp = await axios.get("https://graph.instagram.com/access_token", {
-      params: {
-        grant_type: "ig_exchange_token",
-        client_secret: String(env.instagramClientSecret),
-        access_token: String(shortLivedToken),
-      },
+// --------------------------------------------------------------- connect ---
+router.post(
+  "/connect",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!env.instagramAppId || !env.instagramAppSecret) {
+      throw ApiError.badRequest("Instagram app credentials are not configured", "ig_not_configured");
+    }
+
+    // Instagram appends "#_" to the code in the browser redirect.
+    const code = requireString(req.body?.code, "code", { max: 1000 }).replace(/#_$/, "");
+    const redirectUri = req.body?.redirectUri
+      ? requireString(req.body.redirectUri, "redirectUri", { max: 500 })
+      : env.instagramRedirectUri;
+    if (!redirectUri) throw ApiError.badRequest("redirectUri is required", "validation_error");
+
+    let shortLived;
+    let longLived;
+    let profile;
+    try {
+      shortLived = await ig.exchangeCodeForToken({ code, redirectUri });
+      longLived = await ig.exchangeForLongLivedToken(shortLived.accessToken);
+      profile = await ig.fetchProfile(longLived.accessToken);
+    } catch (e) {
+      const message = extractErrorMessage(e);
+      logActivity(req.userId, "instagram.error", `Connect failed: ${message}`);
+      throw new ApiError(e?.response?.status || 400, message, "ig_connect_failed");
+    }
+
+    // Both ids are captured now: igUserId (app-scoped) and igBusinessId (the id
+    // webhooks arrive under). Storing both is what removes the old guesswork.
+    const update = {
+      userId: req.userId,
+      igUserId: profile.igUserId || shortLived.userId,
+      igBusinessId: profile.igBusinessId || profile.igUserId || shortLived.userId,
+      username: profile.username,
+      accountType: profile.accountType,
+      profilePictureUrl: profile.profilePictureUrl,
+      followersCount: profile.followersCount,
+      mediaCount: profile.mediaCount,
+      accessToken: longLived.accessToken,
+      tokenType: longLived.tokenType,
+      tokenExpiresAt: longLived.expiresAt,
+      lastRefreshedAt: new Date(),
+      connectedAt: new Date(),
+      invalidatedAt: null,
+      lastError: "",
+    };
+
+    let account;
+    try {
+      account = await IgAccount.findOneAndUpdate(
+        { userId: req.userId },
+        { $set: update },
+        { upsert: true, returnDocument: "after", runValidators: true, setDefaultsOnInsert: true },
+      );
+    } catch (e) {
+      if (isDuplicateKeyError(e)) {
+        // The unique index on igBusinessId is intentional: one Instagram account
+        // must not be driven by two tenants, or both would reply to every comment.
+        throw ApiError.conflict(
+          "That Instagram account is already connected to another SocialAI account.",
+          "ig_already_linked",
+        );
+      }
+      throw e;
+    }
+
+    logActivity(req.userId, "instagram.connected", `Connected @${profile.username}`, {
+      igBusinessId: account.igBusinessId,
     });
 
-    const { access_token: accessToken, token_type: tokenType, expires_in: expiresInSec } = longResp.data || {};
-    if (!accessToken) {
-      console.error("Instagram long-lived token response missing access_token.");
-      return res.status(500).json({ error: "Instagram long-lived token response missing access_token" });
+    res.json({ instagram: account.toPublic() });
+  }),
+);
+
+// ------------------------------------------------------------ disconnect ---
+router.delete(
+  "/connect",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const account = await IgAccount.findOne({ userId: req.userId });
+    if (!account) throw ApiError.notFound("No Instagram account is connected", "ig_not_connected");
+
+    const purge = req.query.purge === "true";
+    await IgAccount.deleteOne({ _id: account._id });
+    if (purge) {
+      await Promise.all([
+        Post.deleteMany({ userId: req.userId }),
+        Comment.deleteMany({ userId: req.userId }),
+      ]);
     }
-    console.log(`Received long-lived token: ${redactToken(accessToken)}. Saving to DB.`);
 
-    // Save mapping appUserId <-> basicUserId + token
-    const tokenExpiresAt =
-      typeof expiresInSec === "number" && Number.isFinite(expiresInSec) && expiresInSec > 0
-        ? new Date(Date.now() + expiresInSec * 1000)
-        : null;
+    logActivity(req.userId, "instagram.disconnected", `Disconnected @${account.username}`);
+    res.json({ ok: true, purged: purge });
+  }),
+);
 
-    await IgAccount.findOneAndUpdate(
-      { appUserId: req.appUserId },
-      {
-        $set: {
-          basicUserId: String(user_id),
-          accessToken: String(accessToken),
-          tokenType: tokenType ? String(tokenType) : null,
-          tokenExpiresAt,
-        },
-      },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
-    );
-    console.log(`Saved mapping for app user ${req.appUserId}`);
+// ---------------------------------------------------------------- status ---
+router.get(
+  "/status",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const account = await IgAccount.findOne({ userId: req.userId });
+    if (!account) return res.json({ connected: false });
 
-    return res.json({ ok: true, basicUserId: String(user_id) });
-  } catch (e) {
-    const msg = extractErrorMessage(e);
-    console.error("Instagram token exchange error:", e?.response?.data || e.message);
+    // Refresh opportunistically while the user is looking at the page.
+    await ig.ensureFreshToken(account);
+    res.json(account.toPublic());
+  }),
+);
 
-    if (isDuplicateKeyError(e)) {
-      return res.status(409).json({ error: msg || "Instagram account already linked" });
-    }
-    const status = e?.response?.status;
-    if (typeof status === "number" && status >= 400 && status < 600) {
-      return res.status(status).json({ error: msg || `HTTP ${status}` });
-    }
-    return res.status(500).json({ error: msg || "Instagram token exchange failed" });
-  }
-});
-
-module.exports = router;
+module.exports = { router, IG_SCOPES };

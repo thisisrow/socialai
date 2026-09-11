@@ -1,27 +1,183 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss";
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+/*
+ * Design tokens. Every colour in the app resolves through one of these, so the
+ * light/dark swap below is the only place theming lives.
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --color-brand-50: oklch(0.97 0.014 285);
+  --color-brand-100: oklch(0.94 0.03 285);
+  --color-brand-200: oklch(0.89 0.06 285);
+  --color-brand-300: oklch(0.81 0.1 285);
+  --color-brand-400: oklch(0.71 0.15 285);
+  --color-brand-500: oklch(0.62 0.19 285);
+  --color-brand-600: oklch(0.55 0.21 285);
+  --color-brand-700: oklch(0.48 0.19 285);
+  --color-brand-800: oklch(0.4 0.16 285);
+  --color-brand-900: oklch(0.33 0.13 285);
+
+  --radius-card: 0.875rem;
 }
 
-body {
-  margin: 0;
+/*
+ * Semantic surface variables. Components reference these (bg-[var(--surface)])
+ * rather than picking a slate shade, which keeps dark mode consistent.
+ */
+@layer base {
+  :root {
+    --bg: oklch(0.98 0.003 285);
+    --bg-subtle: oklch(0.96 0.005 285);
+    --surface: oklch(1 0 0);
+    --surface-hover: oklch(0.975 0.004 285);
+    --border: oklch(0.91 0.006 285);
+    --border-strong: oklch(0.85 0.008 285);
+    --text: oklch(0.22 0.01 285);
+    --text-muted: oklch(0.52 0.015 285);
+    --text-subtle: oklch(0.64 0.012 285);
+    --ring: oklch(0.62 0.19 285);
+    --shadow-card: 0 1px 2px oklch(0.2 0.02 285 / 0.05), 0 1px 3px oklch(0.2 0.02 285 / 0.06);
+    --shadow-pop: 0 10px 30px oklch(0.2 0.02 285 / 0.12), 0 2px 8px oklch(0.2 0.02 285 / 0.08);
+  }
+
+  .dark {
+    --bg: oklch(0.19 0.012 285);
+    --bg-subtle: oklch(0.22 0.014 285);
+    --surface: oklch(0.24 0.014 285);
+    --surface-hover: oklch(0.28 0.016 285);
+    --border: oklch(0.32 0.016 285);
+    --border-strong: oklch(0.4 0.02 285);
+    --text: oklch(0.96 0.004 285);
+    --text-muted: oklch(0.72 0.012 285);
+    --text-subtle: oklch(0.6 0.012 285);
+    --ring: oklch(0.71 0.15 285);
+    --shadow-card: 0 1px 2px oklch(0 0 0 / 0.3), 0 1px 3px oklch(0 0 0 / 0.25);
+    --shadow-pop: 0 10px 30px oklch(0 0 0 / 0.45), 0 2px 8px oklch(0 0 0 / 0.3);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-500);
+    color: white;
+  }
+
+  /* Consistent focus ring everywhere, without per-component repetition. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-subtle);
+  }
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+@layer utilities {
+  .surface {
+    background-color: var(--surface);
+  }
+  .text-muted {
+    color: var(--text-muted);
+  }
+  .text-subtle {
+    color: var(--text-subtle);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-pop {
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* Frosted sidebar/topbar backdrop. */
+  .glass {
+    background-color: color-mix(in oklch, var(--surface) 78%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .animate-in {
+    animation: fade-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-pop {
+    animation: pop 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--bg-subtle) 25%,
+      var(--surface-hover) 50%,
+      var(--bg-subtle) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
 }
-a:hover {
-  color: #535bf2;
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
