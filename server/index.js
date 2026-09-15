@@ -1,6 +1,7 @@
 const { app } = require("./app");
 const { env, assertRequiredEnv, envWarnings } = require("./config/env");
 const { connectMongo, disconnectMongo } = require("./models");
+const { startNgrok, stopNgrok } = require("./lib/ngrok");
 
 async function start() {
   try {
@@ -12,6 +13,11 @@ async function start() {
   }
 
   for (const warning of envWarnings()) console.warn(`[config] ${warning}`);
+
+  if (env.dnsServers.length) {
+    require("dns").setServers(env.dnsServers);
+    console.log(`[boot] DNS servers: ${env.dnsServers.join(", ")}`);
+  }
 
   console.log("[boot] connecting to MongoDB...");
   try {
@@ -26,10 +32,12 @@ async function start() {
     console.log(`[boot] SocialAI API listening on :${env.port} (${env.nodeEnv})`);
     console.log(`[boot] Claude model: ${env.claudeModel} (effort: ${env.claudeEffort})`);
     console.log(`[boot] CORS origins: ${env.corsOrigins.join(", ")}`);
+    startNgrok();
   });
 
   const shutdown = async (signal) => {
     console.log(`\n[shutdown] ${signal} received, closing...`);
+    await stopNgrok();
     server.close(async () => {
       await disconnectMongo().catch(() => {});
       process.exit(0);

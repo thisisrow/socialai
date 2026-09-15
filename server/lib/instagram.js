@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const axios = require("axios");
+const jwt = require("jsonwebtoken");
 const { env } = require("../config/env");
 const { ApiError, extractErrorMessage } = require("./errors");
 
@@ -8,6 +9,7 @@ const OAUTH_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 
 /** Long-lived tokens last 60 days. Refresh once inside this window. */
 const REFRESH_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 function redactToken(token) {
   if (!token) return "";
@@ -212,6 +214,49 @@ function buildAuthorizeUrl({ redirectUri, scopes, state }) {
   return `https://www.instagram.com/oauth/authorize?${params.toString()}`;
 }
 
+/**
+ * Bind an Instagram OAuth attempt to the signed-in SocialAI user and the exact
+ * redirect URI. This prevents a code obtained in one browser/session from
+ * being attached to a different SocialAI account (login CSRF/account linking).
+ */
+function createOAuthState({ userId, redirectUri }) {
+  return jwt.sign(
+    {
+      sub: String(userId),
+      redirectUri: String(redirectUri),
+      purpose: "instagram-connect",
+    },
+    env.jwtSecret,
+    {
+      expiresIn: OAUTH_STATE_TTL_SECONDS,
+      issuer: "socialai",
+      audience: "instagram-oauth",
+    },
+  );
+}
+
+function verifyOAuthState(state, { userId, redirectUri }) {
+  try {
+    const payload = jwt.verify(String(state || ""), env.jwtSecret, {
+      issuer: "socialai",
+      audience: "instagram-oauth",
+    });
+    if (
+      payload.purpose !== "instagram-connect" ||
+      payload.sub !== String(userId) ||
+      payload.redirectUri !== String(redirectUri)
+    ) {
+      throw new Error("OAuth state does not match this connection attempt");
+    }
+    return payload;
+  } catch {
+    throw ApiError.badRequest(
+      "Instagram connection expired or is invalid. Please try connecting again.",
+      "ig_oauth_state_invalid",
+    );
+  }
+}
+
 /** Instagram nests the media id differently depending on the webhook topic. */
 function extractMediaId(value) {
   const id =
@@ -239,5 +284,7 @@ module.exports = {
   ensureFreshToken,
   markAccountInvalid,
   buildAuthorizeUrl,
+  createOAuthState,
+  verifyOAuthState,
   extractMediaId,
 };

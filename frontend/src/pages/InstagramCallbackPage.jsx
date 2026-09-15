@@ -41,11 +41,24 @@ export default function InstagramCallbackPage() {
       return;
     }
 
+    const oauthState = params.get("state");
+    if (!oauthState) {
+      setState({
+        status: "error",
+        message: "Instagram did not return a valid connection state. Please try again.",
+      });
+      return;
+    }
+
     if (exchanged.current) return;
     exchanged.current = true;
 
     api.instagram
-      .connect({ code, redirectUri: `${window.location.origin}/auth/instagram/callback` })
+      .connect({
+        code,
+        state: oauthState,
+        redirectUri: `${window.location.origin}/auth/instagram/callback`,
+      })
       .then(async (result) => {
         await refreshMe().catch(() => {});
         setState({ status: "done", message: `Connected @${result.instagram.username}` });

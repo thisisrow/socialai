@@ -94,7 +94,9 @@ token usage. A credit-balance or auth error is reported in plain language.
 ## How it works
 
 1. **Connect Instagram.** OAuth runs server-side, so the app secret never
-   reaches the browser. On connect the server stores both Instagram IDs: the
+   reaches the browser. A short-lived signed `state` binds every callback to
+   the SocialAI user and exact redirect URI that started it. On connect the
+   server stores both Instagram IDs: the
    app-scoped `igUserId` and the professional-account `igBusinessId`, which is
    what webhook events arrive under.
 2. **Sync posts.** Media and existing comments are copied into MongoDB so the
@@ -127,6 +129,10 @@ rejection, and webhook-to-tenant routing.
 - Point the Meta webhook at `https://your-api/api/webhook/instagram` with your
   `VERIFY_TOKEN`, and subscribe to the `comments` field.
 - `INSTAGRAM_REDIRECT_URI` must match the Meta app entry character for character.
+- The Meta OAuth redirect must include the callback path, for example
+  `https://your-app.vercel.app/auth/instagram/callback` (not just the site root).
+- SocialAI only requests `instagram_business_basic` and
+  `instagram_business_manage_comments`; request Advanced Access for both in App Review.
 - The frontend is a SPA. `frontend/vercel.json` handles this on Vercel; any
   other host needs the equivalent. Three things about that file are load-bearing:
   - The catch-all rewrite to `/index.html` is what stops `/inbox` returning 404

@@ -102,6 +102,7 @@ async function main() {
   console.log("\nAuth lifecycle");
   let alice;
   let bob;
+  let aliceInstagramState;
 
   await test("signup returns an access + refresh token pair", async () => {
     const { status, body } = await call("/api/auth/signup", {
@@ -154,6 +155,42 @@ async function main() {
     assert.equal(status, 200);
     assert.equal(body.user.email, "alice@example.com");
     assert.equal(body.instagram.connected, false);
+  });
+
+  console.log("\nInstagram OAuth");
+  await test("authorize URL includes a signed, user-bound state", async () => {
+    const { status, body } = await call("/api/instagram/authorize-url", {
+      token: alice.accessToken,
+    });
+    assert.equal(status, 200);
+    const url = new URL(body.url);
+    assert.equal(url.searchParams.get("redirect_uri"), process.env.INSTAGRAM_REDIRECT_URI);
+    aliceInstagramState = url.searchParams.get("state");
+    assert.ok(aliceInstagramState, "OAuth state must be present");
+    assert.deepEqual(
+      url.searchParams.get("scope").split(",").sort(),
+      ["instagram_business_basic", "instagram_business_manage_comments"].sort(),
+      "request only the permissions this product uses",
+    );
+  });
+
+  await test("authorize URL rejects a redirect URI that differs from server config", async () => {
+    const { status, body } = await call(
+      "/api/instagram/authorize-url?redirectUri=https%3A%2F%2Fevil.example%2Fcallback",
+      { token: alice.accessToken },
+    );
+    assert.equal(status, 400);
+    assert.equal(body.code, "ig_redirect_mismatch");
+  });
+
+  await test("connect rejects a missing OAuth state before token exchange", async () => {
+    const { status, body } = await call("/api/instagram/connect", {
+      method: "POST",
+      token: alice.accessToken,
+      body: { code: "not-a-real-code", redirectUri: process.env.INSTAGRAM_REDIRECT_URI },
+    });
+    assert.equal(status, 400);
+    assert.equal(body.code, "ig_oauth_state_invalid");
   });
 
   console.log("\nRefresh token rotation");
@@ -221,6 +258,20 @@ async function main() {
     bob = body;
   });
 
+  await test("an OAuth state cannot be used by another SocialAI user", async () => {
+    const { status, body } = await call("/api/instagram/connect", {
+      method: "POST",
+      token: bob.accessToken,
+      body: {
+        code: "not-a-real-code",
+        state: aliceInstagramState,
+        redirectUri: process.env.INSTAGRAM_REDIRECT_URI,
+      },
+    });
+    assert.equal(status, 400);
+    assert.equal(body.code, "ig_oauth_state_invalid");
+  });
+
   // Seed each tenant with a connected account and one post, bypassing the real
   // Instagram OAuth flow.
   const seed = async (session, igBusinessId, mediaId) => {
@@ -245,6 +296,53 @@ async function main() {
 
   await seed(alice, "1111", "media-alice");
   await seed(bob, "2222", "media-bob");
+
+  await test("sync imports posts without overwriting saved context or automation", async () => {
+    const instagramApi = require("../lib/instagram");
+    const originals = {
+      ensureFreshToken: instagramApi.ensureFreshToken,
+      fetchMedia: instagramApi.fetchMedia,
+      fetchComments: instagramApi.fetchComments,
+    };
+    instagramApi.ensureFreshToken = async () => "test-token";
+    instagramApi.fetchMedia = async () => [
+      {
+        id: "media-alice",
+        caption: "Updated caption from Instagram",
+        media_type: "IMAGE",
+        timestamp: new Date().toISOString(),
+        comments_count: 0,
+      },
+      {
+        id: "media-alice-new",
+        caption: "Newly synced post",
+        media_type: "IMAGE",
+        timestamp: new Date().toISOString(),
+        comments_count: 0,
+      },
+    ];
+    instagramApi.fetchComments = async () => [];
+
+    try {
+      const { status, body } = await call("/api/posts/sync", {
+        method: "POST",
+        token: alice.accessToken,
+        body: { limit: 25 },
+      });
+      assert.equal(status, 200);
+      assert.equal(body.posts, 2);
+
+      const existing = await Post.findOne({ userId: alice.user.id, mediaId: "media-alice" }).lean();
+      const imported = await Post.findOne({ userId: alice.user.id, mediaId: "media-alice-new" }).lean();
+      assert.equal(existing.caption, "Updated caption from Instagram");
+      assert.equal(existing.context, "Secret context");
+      assert.equal(existing.autoReplyEnabled, false);
+      assert.ok(imported, "the new Instagram post should be stored");
+    } finally {
+      Object.assign(instagramApi, originals);
+      await Post.deleteOne({ userId: alice.user.id, mediaId: "media-alice-new" });
+    }
+  });
 
   await test("each user sees only their own posts", async () => {
     const a = await call("/api/posts", { token: alice.accessToken });
@@ -281,6 +379,44 @@ async function main() {
     assert.equal(post.context, "Secret context");
   });
 
+  await test("a user can save and clear instructions for their own post", async () => {
+    const saved = await call("/api/posts/media-alice/context", {
+      method: "PUT",
+      token: alice.accessToken,
+      body: { context: "Open daily from 9am to 6pm." },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.hasContext, true);
+
+    const cleared = await call("/api/posts/media-alice/context", {
+      method: "PUT",
+      token: alice.accessToken,
+      body: { context: "" },
+    });
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.body.hasContext, false);
+  });
+
+  await test("a user can turn automation on and off for their own post", async () => {
+    const enabled = await call("/api/posts/media-alice/automation", {
+      method: "PUT",
+      token: alice.accessToken,
+      body: { enabled: true },
+    });
+    assert.equal(enabled.status, 200);
+    assert.equal(enabled.body.autoReplyEnabled, true);
+    assert.ok(enabled.body.autoReplySince, "enabling must stamp the backlog cutoff");
+
+    const disabled = await call("/api/posts/media-alice/automation", {
+      method: "PUT",
+      token: alice.accessToken,
+      body: { enabled: false },
+    });
+    assert.equal(disabled.status, 200);
+    assert.equal(disabled.body.autoReplyEnabled, false);
+    assert.equal(disabled.body.autoReplySince, null);
+  });
+
   await test("bulk automation only touches the caller's posts", async () => {
     const { status, body } = await call("/api/posts/automation/bulk", {
       method: "POST",
@@ -303,12 +439,21 @@ async function main() {
     await call("/api/ai/settings", {
       method: "PUT",
       token: alice.accessToken,
-      body: { tone: "playful", businessName: "Alice Co" },
+      body: {
+        tone: "playful",
+        businessName: "Alice Co",
+        customInstructions: "Never mention competitors.",
+        autoReplyByDefault: true,
+      },
     });
 
     const b = await call("/api/ai/settings", { token: bob.accessToken });
     assert.equal(b.body.settings.tone, "friendly", "Bob must not see Alice's settings");
     assert.equal(b.body.settings.businessName, "", "signup must not guess a business name");
+
+    const aAgain = await call("/api/ai/settings", { token: alice.accessToken });
+    assert.equal(aAgain.body.settings.customInstructions, "Never mention competitors.");
+    assert.equal(aAgain.body.settings.autoReplyByDefault, true);
   });
 
   await test("an invalid tone is rejected", async () => {

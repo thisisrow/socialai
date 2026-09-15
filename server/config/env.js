@@ -28,6 +28,9 @@ const env = {
 
   // --- Database ---
   mongodbUri: process.env.MONGODB_URI,
+  // Override Node's DNS resolvers. Needed when Node picks up a dead local
+  // resolver (e.g. 127.0.0.1) and mongodb+srv lookups fail with querySrv ECONNREFUSED.
+  dnsServers: splitList(process.env.DNS_SERVERS),
 
   // --- Auth ---
   jwtSecret: process.env.JWT_SECRET,
@@ -46,6 +49,11 @@ const env = {
   verifyToken: process.env.VERIFY_TOKEN,
   igGraphVersion: process.env.IG_GRAPH_VERSION || "v23.0",
   verifyWebhookSignature: bool(process.env.VERIFY_WEBHOOK_SIGNATURE, true),
+
+  // --- ngrok ---
+  ngrokEnabled: bool(process.env.NGROK_ENABLED, false),
+  ngrokAuthtoken: process.env.NGROK_AUTHTOKEN,
+  ngrokDomain: process.env.NGROK_DOMAIN,
 
   // --- App behaviour ---
   corsOrigins: parsedCorsOrigins.length ? parsedCorsOrigins : defaultCorsOrigins,

@@ -11,9 +11,6 @@ const router = express.Router();
 const IG_SCOPES = [
   "instagram_business_basic",
   "instagram_business_manage_comments",
-  "instagram_business_manage_messages",
-  "instagram_business_content_publish",
-  "instagram_business_manage_insights",
 ];
 
 /**
@@ -27,16 +24,26 @@ router.get(
     if (!env.instagramAppId) {
       throw ApiError.badRequest("INSTAGRAM_APP_ID is not configured on the server", "ig_not_configured");
     }
-    const redirectUri = req.query.redirectUri
-      ? String(req.query.redirectUri)
-      : env.instagramRedirectUri;
+    const requestedRedirectUri = req.query.redirectUri ? String(req.query.redirectUri) : "";
+    if (
+      env.instagramRedirectUri &&
+      requestedRedirectUri &&
+      requestedRedirectUri !== env.instagramRedirectUri
+    ) {
+      throw ApiError.badRequest(
+        "redirectUri does not match INSTAGRAM_REDIRECT_URI",
+        "ig_redirect_mismatch",
+      );
+    }
+    const redirectUri = env.instagramRedirectUri || requestedRedirectUri;
     if (!redirectUri) {
       throw ApiError.badRequest(
         "INSTAGRAM_REDIRECT_URI is not configured on the server",
         "ig_not_configured",
       );
     }
-    res.json({ url: ig.buildAuthorizeUrl({ redirectUri, scopes: IG_SCOPES }), redirectUri });
+    const state = ig.createOAuthState({ userId: req.userId, redirectUri });
+    res.json({ url: ig.buildAuthorizeUrl({ redirectUri, scopes: IG_SCOPES, state }), redirectUri });
   }),
 );
 
@@ -51,10 +58,22 @@ router.post(
 
     // Instagram appends "#_" to the code in the browser redirect.
     const code = requireString(req.body?.code, "code", { max: 1000 }).replace(/#_$/, "");
-    const redirectUri = req.body?.redirectUri
+    const requestedRedirectUri = req.body?.redirectUri
       ? requireString(req.body.redirectUri, "redirectUri", { max: 500 })
-      : env.instagramRedirectUri;
+      : "";
+    if (
+      env.instagramRedirectUri &&
+      requestedRedirectUri &&
+      requestedRedirectUri !== env.instagramRedirectUri
+    ) {
+      throw ApiError.badRequest(
+        "redirectUri does not match INSTAGRAM_REDIRECT_URI",
+        "ig_redirect_mismatch",
+      );
+    }
+    const redirectUri = env.instagramRedirectUri || requestedRedirectUri;
     if (!redirectUri) throw ApiError.badRequest("redirectUri is required", "validation_error");
+    ig.verifyOAuthState(req.body?.state, { userId: req.userId, redirectUri });
 
     let shortLived;
     let longLived;
