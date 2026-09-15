@@ -558,6 +558,31 @@ async function main() {
     assert.equal(saved.source, "webhook");
   });
 
+  await test("legacy account rows without userId cannot hijack webhook routing", async () => {
+    await IgAccount.collection.insertOne({
+      appUserId: alice.user.id,
+      igBusinessId: "legacy-entry",
+      accessToken: "legacy-token",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    try {
+      const status = await postWebhook(
+        commentEvent("legacy-entry", "media-alice", "c-legacy-route", "Is this available?"),
+      );
+      assert.equal(status, 200);
+      await settle();
+
+      const saved = await Comment.findOne({ commentId: "c-legacy-route" }).lean();
+      assert.ok(saved, "the comment should be stored through the synced-media fallback");
+      assert.equal(String(saved.userId), alice.user.id);
+    } finally {
+      await IgAccount.collection.deleteOne({ igBusinessId: "legacy-entry", userId: { $exists: false } });
+      await Comment.deleteOne({ commentId: "c-legacy-route" });
+    }
+  });
+
   await test("redelivery of the same comment is idempotent", async () => {
     await postWebhook(commentEvent("1111", "media-alice", "c-1", "Do you deliver?"));
     await settle();

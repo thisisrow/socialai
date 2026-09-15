@@ -63,6 +63,11 @@ router.get("/instagram", (req, res) => {
  */
 async function resolveAccount(entryId, mediaId) {
   let account = await IgAccount.findOne({
+    // Older deployments stored `appUserId` instead of `userId`. Those rows can
+    // still match an Instagram id, but cannot own records in the current
+    // multi-tenant schema. Ignore them and use the synced-media fallback below
+    // to find the current account safely.
+    userId: { $exists: true, $ne: null },
     $or: [{ igBusinessId: entryId }, { igUserId: entryId }],
   });
   if (account) return account;
